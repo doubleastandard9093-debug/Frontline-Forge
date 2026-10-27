@@ -7,6 +7,7 @@ import { RARITY, ELEMENTS, genGun } from './loot.js';
 import { BACKPACK } from './save.js';
 import { CLASSES, lv } from './classes.js';
 import { installZombies } from './zombies.js';
+import { RENTALS, CAMOS, durMult } from './career.js';
 import { KINDS, createVehicle, syncSolid } from './vehicles.js';
 import { input, pollKeys, consume, endFrame, consumeHeld } from './input.js';
 
@@ -98,7 +99,7 @@ export class Game {
     mesh.position.set(x, h / 2, z); mesh.castShadow = mesh.receiveShadow = true; mesh.userData.kind = 'static'; this.scene.add(mesh); this.hitMeshes.push(mesh);
     this.solids.push({ min: new THREE.Vector3(x - w / 2, 0, z - d / 2), max: new THREE.Vector3(x + w / 2, h, z + d / 2) });
   }
-  gunDef(id) { if (typeof id === 'string' && id[0] === 'L') return this.save.inv.find(x => 'L' + x.uid === id) || GUNS.kr4; return GUNS[id] || GUNS.kr4; }
+  gunDef(id) { if (typeof id === 'string' && id[0] === 'L') return this.save.inv.find(x => 'L' + x.uid === id) || GUNS.kr4; return GUNS[id] || RENTALS[id] || GUNS.kr4; }
   // Learnable recoil: a fixed pattern per gun type; loot guns get a seeded per-maker variant. Grips scale it via w.recoil.
   static recoilKick(w, n) {
     const P = { rifle: [0.35, 0.5, 0.3], smg: [0.6, 0.9, 1], lmg: [0.25, 0.35, 2], pistol: [0.2, 1.3, 0], shotgun: [0.1, 0.5, 0], sniper: [0.15, 0.5, 0] }[w.type] || [0.3, 0.6, 0];
@@ -108,7 +109,7 @@ export class Game {
   makeWeapon(id) {
     const base = this.gunDef(id), att = base.loot ? {} : this.save.attach[id] || {}; const w = Object.assign({ id }, base); w.adsZoom = base.zoom || 1.15;
     for (const a of Object.values(att)) { const mod = ATTACH[a]?.mod || {}; for (const k in mod) w[k] = k === 'adsZoom' ? Math.max(w[k], mod[k]) : w[k] * mod[k]; }
-    w.mag = Math.round(w.mag); w.reload *= 1 - this.save.stats.reload * 0.04; w.ammo = w.mag; w.reloading = 0; return w;
+    w.dmg *= durMult(this.save, id); w.mag = Math.round(w.mag); w.reload *= 1 - this.save.stats.reload * 0.04; w.ammo = w.mag; w.reloading = 0; return w;
   }
   makeUnit(team, isPlayer, name) {
     const u = { id: ++this.nextId, team, isPlayer, name, pos: new THREE.Vector3(), vy: 0, yaw: 0, pitch: 0, hp: 100, maxHp: 100, sh: 100, maxSh: 100, shT: 9, alive: true, onGround: false, kills: 0, deaths: 0, respawn: 0 };
@@ -175,7 +176,7 @@ export class Game {
   // ---------- weapons ----------
   selectSlot(i) {
     this.slot = i; this.buildMode = null; const w = this.slots[i]; this.view.clear();
-    const dark = this.m(0x23252a, 'metal'), add = (geo, x, y, z) => { const o = new THREE.Mesh(geo, dark); o.position.set(x, y, z); this.view.add(o); return o; };
+    const dark = this.m(CAMOS[this.save.cos?.camo]?.color ?? 0x23252a, 'metal'), add = (geo, x, y, z) => { const o = new THREE.Mesh(geo, dark); o.position.set(x, y, z); this.view.add(o); return o; };
     if (w.pick) { add(new THREE.BoxGeometry(0.05, 0.05, 0.6), 0, 0, -0.1).material = this.m(0x6b4a2a, 'wood'); add(new THREE.BoxGeometry(0.45, 0.06, 0.06), 0, 0, -0.42); }
     else { const L = { pistol: 0.25, smg: 0.45, rifle: 0.65, shotgun: 0.7, sniper: 0.9, lmg: 0.8 }[w.type] || 0.5;
       add(new THREE.BoxGeometry(0.07, 0.1, L), 0, 0, -L / 2); add(new THREE.BoxGeometry(0.06, 0.16, 0.08), 0, -0.1, -0.05);
@@ -727,7 +728,7 @@ export class Game {
     for (const d of this.lootDrops.slice()) { d.mesh.children[0].rotation.y += dt * 2; if ((d.life -= dt) <= 0) { this.removeLoot(d); continue; }
       if (P.alive && !P.vehicle && Math.hypot(d.mesh.position.x - P.pos.x, d.mesh.position.z - P.pos.z) < 1.5) {
         if (this.save.inv.length >= BACKPACK) { if (!d.warned) { d.warned = true; this.hooks.toast('Backpack full: sell guns in the Armory'); } continue; }
-        const gun = Object.assign({ uid: this.save.uid++ }, d.gun); this.save.inv.push(gun); this.hooks.persist(); this.removeLoot(d); this.sfx('capture');
+        const gun = Object.assign({ uid: this.save.uid++ }, d.gun); this.save.inv.push(gun); this.stats.loot = (this.stats.loot || 0) + 1; this.hooks.persist(); this.removeLoot(d); this.sfx('capture');
         this.lastLoot = { uid: gun.uid, t: 8 }; this.hooks.toast(`<span style="color:${RARITY[gun.rarity].css}">${RARITY[gun.rarity].name} ${gun.name}</span>${gun.elem ? ' · ' + ELEMENTS[gun.elem].name : ''} added to backpack (F / ENTER to equip now)`, true); } }
     this.nearChest = null; if (P.alive && !P.vehicle) for (const c of this.chests) if (!c.open && Math.hypot(c.x - P.pos.x, c.z - P.pos.z) < 2.6) { this.nearChest = c; break; }
   }

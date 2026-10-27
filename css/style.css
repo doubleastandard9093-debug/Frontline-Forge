@@ -68,3 +68,8 @@ body.touch #minimap{left:auto;right:calc(10px + var(--sr));top:calc(10px + var(-
 #skill{opacity:.7}#skill.ready{opacity:1;color:#ffd84a}
 body.cloaked #visor{background:radial-gradient(ellipse 120% 100% at 50% 50%,transparent 60%,rgba(150,90,255,.35) 100%)}
 .item.cls .row{margin:4px 0}
+#cross[data-ret=dot] i{display:none}#cross[data-ret=dot]::after{content:'';position:absolute;left:-3px;top:-3px;width:6px;height:6px;border-radius:50%;background:#ff3b30}
+#cross[data-ret=ring] i{display:none}#cross[data-ret=ring]::after{content:'';position:absolute;left:-10px;top:-10px;width:16px;height:16px;border:2px solid #fff;border-radius:50%;opacity:.85}
+#cross[data-ret=chevron] i:nth-child(1),#cross[data-ret=chevron] i:nth-child(3),#cross[data-ret=chevron] i:nth-child(4){display:none}#cross[data-ret=chevron] i:nth-child(2){left:-1px;top:2px;height:10px}#cross[data-ret=chevron]::after{content:'';position:absolute;left:-7px;top:-2px;width:10px;height:10px;border-left:2px solid #fff;border-top:2px solid #fff;transform:rotate(45deg)}
+#cross[data-ret=tight] i:nth-child(1){top:-9px;height:5px}#cross[data-ret=tight] i:nth-child(2){top:4px;height:5px}#cross[data-ret=tight] i:nth-child(3){left:-9px;width:5px}#cross[data-ret=tight] i:nth-child(4){left:4px;width:5px}
+.badge{color:#ffd84a;font-weight:700}

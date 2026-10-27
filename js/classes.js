@@ -10,5 +10,5 @@ export const CLASSES = {
     action: { name: 'Arc Turret', desc: 'Deploy a shock turret that fires at enemies', dur: 12, cd: 35 },
     skills: { charged: { name: 'Charged Rounds', desc: '+6% elemental chance (any gun gains Shock)', max: 3 }, overclock: { name: 'Overclock', desc: '-4s action skill cooldown', max: 3 }, twincoil: { name: 'Twin Coil', desc: '+25% turret damage', max: 3 } } },
 };
-export const skillPts = S => S.rank + 1 - Object.values(S.skills || {}).reduce((a, b) => a + b, 0);
+export const skillPts = S => S.rank + 1 + 2 * (S.prestige || 0) - Object.values(S.skills || {}).reduce((a, b) => a + b, 0);
 export const lv = (S, k) => (S.skills || {})[k] || 0;

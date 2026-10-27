@@ -8,6 +8,7 @@ import { Sfx } from './audio.js';
 import { RARITY, ELEMENTS, sellValue, gunLine } from './loot.js';
 import { BACKPACK } from './save.js';
 import { CLASSES, skillPts, lv } from './classes.js';
+import { RENTALS, RENT_PLANS, DURABLE, REPAIR, CAMOS, RETICLES, CRATE_PRICE, MAX_PRESTIGE, gpMult, careerResult, weekly, prestige, openCrate, today } from './career.js';
 
 const $ = id => document.getElementById(id);
 let S = load(); const tier = pickTier(S);
@@ -121,21 +122,23 @@ function drawMap(g, c, full) {
 function applyResult(r) {
   $('spawnsel').classList.add('hidden'); $('spawnsel').dataset.k = '';
   if (r.zombies) { S.zbest = Math.max(S.zbest || 0, r.round); S.ztotal = (S.ztotal || 0) + r.round; }
+  r.gp = Math.round(r.gp * gpMult(S)); const extra = careerResult(S, r);
   S.xp += r.xp; S.gp += r.gp; S.totals.kills += r.stats.kills; S.totals.deaths += r.stats.deaths; S.totals.matches++; if (r.won) S.totals.wins++;
   const before = S.rank; while (S.rank < RANKS.length - 1 && S.xp >= xpForRank(S.rank)) { S.rank++; S.points += 1; S.gp += 250; }
   save(S);
   $('rtitle').textContent = r.zombies ? `SURVIVED ${Math.max(0, r.round - 1)} ROUND${r.round === 2 ? '' : 'S'}` : r.won ? 'VICTORY' : 'DEFEAT';
   $('rbody').innerHTML = `<p>${r.zombies ? `Reached round ${r.round} · Best ${S.zbest}` : `Score ${r.score[0]} – ${r.score[1]}`}</p><p>Kills ${r.stats.kills} · Deaths ${r.stats.deaths} · Headshots ${r.stats.head} · Builds ${r.stats.builds}</p>
-    <p><b>+${r.xp} XP</b> · <b>+${r.gp} GP</b></p>${S.rank > before ? `<h3>RANK UP! You are now ${RANKS[S.rank]}</h3><p>+${S.rank - before} stat point(s), +${(S.rank - before) * 250} GP bonus</p>` : ''}`;
+    <p><b>+${r.xp} XP</b> · <b>+${r.gp} GP</b></p>${extra.map(t => `<p class="note">${t}</p>`).join('')}${S.rank > before ? `<h3>RANK UP! You are now ${RANKS[S.rank]}</h3><p>+${S.rank - before} stat point(s), +${(S.rank - before) * 250} GP bonus</p>` : ''}`;
   show('results');
 }
 
 function startMatch(id) {
+  for (const k of ['primary', 'secondary']) if (RENTALS[S.loadout[k]] && !S.rent[S.loadout[k]]) S.loadout[k] = k === 'primary' ? 'kr4' : 'vx9';
   if (isTouch && !S.gyroAsked && gyroSupported()) { S.gyroAsked = true; save(S); askGyro(); } /* first match start: ask inside this tap */ $('spawnsel').classList.add('hidden'); $('spawnsel').dataset.k = ''; game = game || new Game(canvas, tier, S, hooks); game.paused = false; show(null); game.start(id, mode); game.sfx = (n, p) => sfx.play(n, p, p && game.camera.position); game.engine = (k, t) => sfx.setEngine(k, t); }
 
 function rankHtml() {
   const prev = S.rank ? xpForRank(S.rank - 1) : 0, next = xpForRank(S.rank), pct = Math.min(100, (S.xp - prev) / (next - prev) * 100);
-  return `<div><b>${RANKS[S.rank]}</b> · ${S.xp} XP · ${S.gp} GP</div><div class="bar"><i style="width:${pct}%"></i></div><small>${next - S.xp} XP to ${RANKS[S.rank + 1] || 'max'}</small>`;
+  return `<div>${S.prestige ? `<span class="badge">★P${S.prestige}</span> ` : ''}<b>${RANKS[S.rank]}</b> · ${S.xp} XP · ${S.gp} GP</div><div class="bar"><i style="width:${pct}%"></i></div><small>${next - S.xp} XP to ${RANKS[S.rank + 1] || 'max'}</small>`;
 }
 function render(id) {
   if (id === 'menu') $('profile').innerHTML = rankHtml();
@@ -153,7 +156,7 @@ function render(id) {
 }
 function renderShop() {
   $('gp').innerHTML = rankHtml();
-  const eqName = id => id[0] === 'L' ? (S.inv.find(x => 'L' + x.uid === id)?.name || '?') : GUNS[id]?.name;
+  const eqName = id => id[0] === 'L' ? (S.inv.find(x => 'L' + x.uid === id)?.name || '?') : (GUNS[id] || RENTALS[id])?.name;
   $('backpack').innerHTML = `<h3>Backpack ${S.inv.length}/${BACKPACK}</h3><p class="note">Loot drops from enemies and chests. Equipped: ${eqName(S.loadout.primary)} / ${eqName(S.loadout.secondary)}</p>` + (S.inv.length ? '' : '<p class="note">Empty. Kill enemies and open chests to find loot guns.</p>') +
     S.inv.slice().sort((a, b) => b.rarity - a.rarity).map(g => { const id = 'L' + g.uid, slot = g.type === 'pistol' ? 'secondary' : 'primary', eq = S.loadout[slot] === id;
       return `<div class="item loot" style="border-left:4px solid ${RARITY[g.rarity].css}"><div class="nm"><b style="color:${RARITY[g.rarity].css}">${g.name}</b> <small>${RARITY[g.rarity].name} · Lv ${g.lvl} · ${gunLine(g)}</small></div>
@@ -168,8 +171,20 @@ function renderShop() {
     return `<div class="item ${lock ? 'locked' : ''}"><div class="nm"><b>${g.name}</b> <small>${g.type.toUpperCase()} · DMG ${g.dmg} · ${g.rpm} RPM · MAG ${g.mag}</small></div>
       ${own ? `<button data-eq="${id}" class="${eq ? 'on' : ''}">${eq ? 'Equipped' : 'Equip ' + slot}</button>` : lock ? `<span>Unlocks at ${RANKS[g.rank]}</span>` : `<button data-buy="${id}">Buy ${g.price} GP</button>`}${att}</div>`;
   }).join('');
+  $('rentals').innerHTML = '<p class="note">Top-tier guns for a limited number of matches.</p>' + Object.entries(RENTALS).map(([id, g]) => { const left = S.rent[id], slot = g.type === 'pistol' ? 'secondary' : 'primary', eq = S.loadout[slot] === id;
+    return `<div class="item"><div class="nm"><b>${g.name}</b> <small>${g.type.toUpperCase()} · DMG ${g.dmg} · ${g.rpm} RPM · MAG ${g.mag}${left ? ` · ${left} matches left` : ''}</small></div>${left ? `<button data-eq="${id}" class="${eq ? 'on' : ''}">${eq ? 'Equipped' : 'Equip'}</button>` : ''}${RENT_PLANS.map((p, i) => `<button data-rent="${id}:${i}">Rent ${p.matches} matches · ${p.price} GP</button>`).join('')}</div>`; }).join('') +
+    DURABLE.filter(id => S.owned.includes(id)).map(id => `<div class="item"><div class="nm"><b>${GUNS[id].name}</b> <small>Durability ${S.dura[id] ?? 100}% (−5% per match used; at 0% it does −20% damage)</small></div><button data-rep="${id}" ${(S.dura[id] ?? 100) < 100 ? '' : 'disabled'}>Repair ${REPAIR} GP</button></div>`).join('');
+  document.querySelectorAll('[data-rent]').forEach(b => b.onclick = () => { const [id, i] = b.dataset.rent.split(':'), p = RENT_PLANS[i]; if (S.gp < p.price) return alert('Not enough GP'); S.gp -= p.price; S.rent[id] = (S.rent[id] || 0) + p.matches; save(S); renderShop(); });
+  document.querySelectorAll('[data-rep]').forEach(b => b.onclick = () => { if (S.gp < REPAIR) return alert('Not enough GP'); S.gp -= REPAIR; S.dura[b.dataset.rep] = 100; save(S); renderShop(); });
+  const C = S.cos;
+  $('cosmetics').innerHTML = `<p class="note">Supply crate: a random camo or reticle (duplicates refund 300 GP). Camos are flat color swaps, so they cost nothing on Low.</p><button id="crate">Open supply crate · ${CRATE_PRICE} GP</button><p id="crateRes" class="note"></p>
+    <div class="att">${C.camos.map(k => `<button data-camo="${k}" class="${C.camo === k ? 'on' : ''}"><span style="display:inline-block;width:10px;height:10px;background:#${CAMOS[k].color.toString(16).padStart(6, '0')}"></span> ${CAMOS[k].name}</button>`).join('')}</div>
+    <div class="att">${C.rets.map(k => `<button data-reticle="${k}" class="${C.ret === k ? 'on' : ''}">${RETICLES[k]}</button>`).join('')}</div>`;
+  $('crate').onclick = () => { const r = openCrate(S); if (!r) return alert('Not enough GP'); save(S); renderShop(); $('crateRes').textContent = `Crate: ${r.kind === 'camo' ? 'Camo ' + CAMOS[r.k].name : 'Reticle ' + RETICLES[r.k]}${r.dup ? ' (duplicate, +300 GP)' : ' — new!'}`; };
+  document.querySelectorAll('[data-camo]').forEach(b => b.onclick = () => { C.camo = b.dataset.camo; save(S); renderShop(); });
+  document.querySelectorAll('[data-reticle]').forEach(b => b.onclick = () => { C.ret = b.dataset.reticle; $('cross').dataset.ret = C.ret; save(S); renderShop(); });
   document.querySelectorAll('[data-buy]').forEach(b => b.onclick = () => { const g = GUNS[b.dataset.buy]; if (S.gp < g.price) return alert('Not enough GP'); S.gp -= g.price; S.owned.push(b.dataset.buy); save(S); renderShop(); });
-  document.querySelectorAll('[data-eq]').forEach(b => b.onclick = () => { const id = b.dataset.eq; S.loadout[GUNS[id].type === 'pistol' ? 'secondary' : 'primary'] = id; save(S); renderShop(); });
+  document.querySelectorAll('[data-eq]').forEach(b => b.onclick = () => { const id = b.dataset.eq; S.loadout[(GUNS[id] || RENTALS[id]).type === 'pistol' ? 'secondary' : 'primary'] = id; save(S); renderShop(); });
   document.querySelectorAll('[data-att]').forEach(b => b.onclick = () => { const [id, a] = b.dataset.att.split(':'), A = ATTACH[a]; if (S.rank < A.rank) return;
     if (!S.ownedAttach.includes(a)) { if (S.gp < A.price) return alert('Not enough GP'); S.gp -= A.price; S.ownedAttach.push(a); }
     const cur = S.attach[id] || (S.attach[id] = {}); cur[A.slot] = cur[A.slot] === a ? undefined : a; save(S); renderShop(); });
@@ -186,6 +201,12 @@ function renderClasses() {
   $('respec').onclick = () => { if (S.gp < 100) return alert('Not enough GP'); S.gp -= 100; S.skills = {}; save(S); renderClasses(); };
 }
 function renderStats() {
+  const wk = weekly(S);
+  $('career').innerHTML = `<h3>Weekly challenges</h3>${wk.map(c => `<div class="item"><div class="nm"><b>${c.done ? '✔ ' : ''}${c.d}</b> <small>${Math.min(c.p, c.n)}/${c.n} · reward 1500 XP + 1500 GP</small></div></div>`).join('')}
+    <p class="note">First win of the day: ${S.dailyWin === today() ? 'claimed today ✔' : '+1000 XP, +500 GP (or reach Zombies round 6)'} · GP bonus from prestige: +${Math.round((gpMult(S) - 1) * 100)}%</p>
+    <h3>Prestige ${S.prestige || 0}/${MAX_PRESTIGE}</h3><p class="note">At General you can prestige: rank resets to Recruit, you keep guns, loot and stats, and gain a badge, +5% GP, +2 skill points and 2000 GP.</p>
+    <button id="prestige" class="danger" ${S.rank >= 16 && (S.prestige || 0) < MAX_PRESTIGE ? '' : 'disabled'}>Prestige</button>`;
+  $('prestige').onclick = () => { if (confirm('Reset your rank to Recruit for a prestige badge?') && prestige(S)) { save(S); renderStats(); } };
   $('statlist').innerHTML = `<p>${rankHtml()}</p><p>Unspent points: <b>${S.points}</b> (1 per rank up)</p>` + Object.entries(STATS).map(([k, s]) =>
     `<div class="item"><div class="nm"><b>${s.name}</b> ${S.stats[k]}/${s.max}<small>${s.desc} per level</small></div><button data-st="${k}" ${S.points && S.stats[k] < s.max ? '' : 'disabled'}>+1</button></div>`).join('') +
     `<p class="note">Career: ${S.totals.matches} matches · ${S.totals.wins} wins · ${S.totals.kills} kills · ${S.totals.deaths} deaths</p>`;
@@ -199,4 +220,5 @@ $('exp').onclick = () => { $('code').value = exportCode(S); $('code').select(); 
 $('imp').onclick = () => { try { S = importCode($('code').value); save(S); alert('Save imported'); location.reload(); } catch (e) { alert('Invalid save code'); } };
 $('wipe').onclick = () => { if (confirm('Reset all progress?')) { S = fresh(); save(S); location.reload(); } };
 window.__ff = { get game() { return game; }, get save() { return S; }, tier, startMatch, setMode: m => mode = m };
+$('cross').dataset.ret = S.cos.ret;
 show('menu');
