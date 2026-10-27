@@ -27,7 +27,7 @@ export function highTexture(kind) {
 }
 export function mat(tier, color, kind, repeat = 1) {
   if (tier !== 'high') return new THREE.MeshLambertMaterial({ color });
-  const m = new THREE.MeshStandardMaterial({ color, roughness: 0.85, metalness: kind === 'metal' ? 0.5 : 0 });
+  const m = new THREE.MeshStandardMaterial({ color, roughness: 0.85, metalness: kind === 'metal' ? 0.15 : 0 });
   if (kind) { m.map = highTexture(kind); m.map.repeat.set(repeat, repeat); m.color.set(0xffffff).lerp(new THREE.Color(color), 0.35); }
   return m;
 }

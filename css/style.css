@@ -39,3 +39,5 @@ textarea{width:min(560px,90vw);height:80px;background:#0e1116;color:#ddd;border:
 .b-build{right:calc(30px + var(--sr));bottom:calc(220px + var(--sb))}.b-edit{right:calc(110px + var(--sr));bottom:calc(230px + var(--sb))}
 .b-menu{left:calc(12px + var(--sl));top:calc(12px + var(--st));width:44px!important;height:44px!important}
 body.touch #bl{bottom:calc(190px + var(--sb))}body.touch #br{bottom:auto;top:calc(60px + var(--st))}
+.b-enter{right:calc(200px + var(--sr));bottom:calc(110px + var(--sb))}
+#prompt{position:absolute;top:65%;width:100%;text-align:center;font-size:15px}

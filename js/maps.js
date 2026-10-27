@@ -10,7 +10,7 @@ export const MAPS = {
       const trees = [], rocks = []; for (let i = 0; i < 10; i++) trees.push([(r() - 0.5) * 50, (r() - 0.5) * 50]);
       for (let i = 0; i < 6; i++) rocks.push([(r() - 0.5) * 48, (r() - 0.5) * 48]);
       return { boxes: b.filter(x => Math.hypot(x[0], x[1] - 22) > 6 && Math.hypot(x[0], x[1] + 22) > 6 || x[4] === 5), trees, rocks,
-        spawns: [[0, 24], [0, -24]] }; },
+        spawns: [[0, 24], [0, -24]], vehicles: [['mech', 8, 22, 0], ['mech', -8, -22, 1]] }; },
   },
   ridgeback: {
     name: 'Ridgeback Valley', type: 'large', mode: 'Large Team Battle', desc: 'Open valley, room to build. 10v10, long matches.',
@@ -21,6 +21,6 @@ export const MAPS = {
       const trees = [], rocks = []; for (let i = 0; i < 60; i++) trees.push([(r() - 0.5) * 150, (r() - 0.5) * 150]);
       for (let i = 0; i < 25; i++) rocks.push([(r() - 0.5) * 150, (r() - 0.5) * 150]);
       const ok = p => Math.abs(p[1]) < 60 || Math.abs(p[0]) > 14;
-      return { boxes: b.filter(ok), trees: trees.filter(ok), rocks: rocks.filter(ok), spawns: [[0, 70], [0, -70]] }; },
+      return { boxes: b.filter(ok), trees: trees.filter(ok), rocks: rocks.filter(ok), spawns: [[0, 70], [0, -70]], vehicles: [['mech', -10, 66, 0], ['tank', 10, 64, 0], ['mech', 10, -66, 1], ['tank', -10, -64, 1]] }; },
   },
 };
