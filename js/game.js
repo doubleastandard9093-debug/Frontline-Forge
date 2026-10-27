@@ -83,7 +83,7 @@ export class Game {
     w.mag = Math.round(w.mag); w.reload *= 1 - this.save.stats.reload * 0.04; w.ammo = w.mag; w.reloading = 0; return w;
   }
   makeUnit(team, isPlayer, name) {
-    const u = { id: ++this.nextId, team, isPlayer, name, pos: new THREE.Vector3(), vy: 0, yaw: 0, pitch: 0, hp: 100, maxHp: 100, alive: true, onGround: false, kills: 0, deaths: 0, respawn: 0 };
+    const u = { id: ++this.nextId, team, isPlayer, name, pos: new THREE.Vector3(), vy: 0, yaw: 0, pitch: 0, hp: 100, maxHp: 100, sh: 70, maxSh: 70, shT: 9, alive: true, onGround: false, kills: 0, deaths: 0, respawn: 0 };
     if (!isPlayer) {
       const g = new THREE.Group(), col = team === 0 ? 0x3d6fb0 : 0xb5452f;
       const body = new THREE.Mesh(new THREE.BoxGeometry(0.7, 1.1, 0.4), this.m(col)); body.position.y = 1.05;
@@ -105,7 +105,7 @@ export class Game {
       u.pos.set(THREE.MathUtils.clamp(sp[0] + (Math.random() - 0.5) * this.map.size * 0.5, -h, h), 0, THREE.MathUtils.clamp(sp[1] + (Math.random() - 0.5) * 8, -h, h));
       if (!this.blocked(u.pos)) break;
     }
-    u.hp = u.maxHp; u.alive = true; u.vy = 0; u.yaw = u.team === 0 ? 0 : Math.PI; u.pitch = 0; u.spawnProt = 2;
+    u.hp = u.maxHp; u.sh = u.maxSh; u.shT = 9; u.alive = true; u.vy = 0; u.yaw = u.team === 0 ? 0 : Math.PI; u.pitch = 0; u.spawnProt = 2;
     if (u.mesh) u.mesh.visible = true;
   }
   blocked(p) { for (const s of this.solids) if (p.x > s.min.x - RAD && p.x < s.max.x + RAD && p.z > s.min.z - RAD && p.z < s.max.z + RAD && s.max.y > p.y + 0.5 && s.min.y < p.y + 1.7) return true; return false; }
@@ -198,7 +198,10 @@ export class Game {
   hurt(u, dmg, src, head) {
     if (!u.alive || u.spawnProt > 0 || (src && src.team === u.team && src !== u)) return;
     if (u.vehicle) { this.hurtVehicle(u.vehicle, dmg, src); return; }
-    u.hp -= dmg; if (src.isPlayer) { this.stats.dmg += dmg; this.hooks.hitmark(head); }
+    // Recharging energy shield over health: absorbs damage first (no headshot bonus on shields), pops when depleted.
+    u.shT = 0; if (head && u.sh > 0) dmg /= 2;
+    if (u.sh > 0) { const a = Math.min(u.sh, dmg); u.sh -= a; dmg -= a; if (u.sh <= 0) this.shieldPop(u); if (head && dmg > 0) dmg *= 2; }
+    u.hp -= dmg; dmg += 0; if (src.isPlayer) { this.stats.dmg += dmg; this.hooks.hitmark(head); }
     if (u.isPlayer) this.hooks.hurt();
     if (!u.isPlayer && src && !u.target) u.target = src;
     if (u.hp <= 0) {
@@ -375,6 +378,7 @@ export class Game {
     for (const v of this.vehicles) if (!v.alive) { v.respawn -= dt; if (v.respawn <= 0) this.respawnVehicle(v); }
     // view-distance LOD: skip drawing far bots
     const lod = this.tier === 'low' ? 85 : 160; for (const u of this.units) if (u.mesh && u.alive) u.mesh.visible = u.pos.distanceTo(P.pos) < lod;
+    this.regenShields(dt);
     // bots & respawns
     for (const u of this.units) {
       if (!u.alive) { u.respawn -= dt; if (u.respawn <= 0 && !this.over) this.spawn(u); continue; }
@@ -420,6 +424,12 @@ export class Game {
     for (const v of this.vehicles) if (v.alive && v.team !== src.team) { const d = v.pos.distanceTo(pt); if (d < r + 1.5) this.hurtVehicle(v, dmg * 0.8, src); }
     for (const b of this.builds.slice()) { if (b.mesh.position.distanceTo(pt) < r + 1) { b.hp -= dmg * 1.5; if (b.hp <= 0) this.removeBuild(b); } }
   }
+  shieldPop(u) {
+    if (u.isPlayer) { this.hooks.shieldPop(); return; }
+    const fx = new THREE.Mesh(new THREE.SphereGeometry(1.1, 10, 8), new THREE.MeshBasicMaterial({ color: 0x7fd8ff, transparent: true, opacity: 0.55, depthWrite: false }));
+    fx.position.copy(u.pos); fx.position.y += 1.1; this.scene.add(fx); let t = 0; const step = () => { t += 0.05; fx.scale.setScalar(1 + t * 2); fx.material.opacity = 0.55 * (1 - t / 0.3); if (t < 0.3 && this.scene) requestAnimationFrame(step); else this.scene?.remove(fx); }; step();
+  }
+  regenShields(dt) { for (const u of this.units) if (u.alive) { u.shT += dt; if (u.shT > 4 && u.sh < u.maxSh) { const was = u.sh; u.sh = Math.min(u.maxSh, u.sh + 35 * dt); if (u.isPlayer && was === 0) this.hooks.toast('Shield recharging'); } } }
   hurtVehicle(v, dmg, src) {
     if (!v.alive || (src && src.team === v.team)) return; v.hp -= dmg; if (src?.isPlayer) this.hooks.hitmark(false);
     if (v.seats.some(s => s.unit === this.player)) this.hooks.hurt();

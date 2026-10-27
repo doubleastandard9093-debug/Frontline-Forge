@@ -41,3 +41,6 @@ textarea{width:min(560px,90vw);height:80px;background:#0e1116;color:#ddd;border:
 body.touch #bl{bottom:calc(190px + var(--sb))}body.touch #br{bottom:auto;top:calc(60px + var(--st))}
 .b-enter{right:calc(200px + var(--sr));bottom:calc(110px + var(--sb))}
 #prompt{position:absolute;top:65%;width:100%;text-align:center;font-size:15px}
+#shbar{width:200px;height:14px;background:rgba(0,20,40,.5);border:1px solid #7fd8ff;border-radius:7px;overflow:hidden;margin-bottom:4px}#shfill{height:100%;background:linear-gradient(90deg,#4fb7ff,#bff0ff)}#shbar.low{animation:blink .4s infinite}@keyframes blink{50%{border-color:#ff4040}}
+#pop{position:absolute;inset:0;pointer-events:none;opacity:0;box-shadow:inset 0 0 160px rgba(120,210,255,.9)}#pop.go{animation:pop .45s}@keyframes pop{0%{opacity:1}100%{opacity:0}}
+#hpbar{height:7px}

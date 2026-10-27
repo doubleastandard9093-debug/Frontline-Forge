@@ -19,6 +19,7 @@ const hooks = {
     const P = g.player, w = g.slots[g.slot];
     $('sc0').textContent = g.score[0]; $('sc1').textContent = g.score[1];
     const t = Math.max(0, Math.ceil(g.timeLeft)); $('timer').textContent = `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`;
+    $('shfill').style.width = Math.max(0, P.sh / P.maxSh * 100) + '%'; $('shbar').classList.toggle('low', P.sh < P.maxSh * 0.25);
     $('hpfill').style.width = Math.max(0, P.hp / P.maxHp * 100) + '%'; $('hptext').textContent = Math.max(0, Math.ceil(P.hp));
     $('wname').textContent = w.pick ? 'Breacher Pick' : w.name;
     $('ammo').textContent = w.pick ? '—' : w.reloading > 0 ? 'RELOAD' : `${w.ammo} / ${w.mag}`;
@@ -31,6 +32,7 @@ const hooks = {
   },
   toast(m) { toastEl.textContent = m; clearTimeout(toastT); toastT = setTimeout(() => toastEl.textContent = '', 1200); },
   hitmark(head) { const h = $('hitm'); h.classList.toggle('head', head); h.style.opacity = 1; setTimeout(() => h.style.opacity = 0, 120); },
+  shieldPop() { const h = $('pop'); h.classList.remove('go'); void h.offsetWidth; h.classList.add('go'); },
   hurt() { const h = $('hurt'); h.style.opacity = 1; setTimeout(() => h.style.opacity = 0, 200); },
   feed(a, b, head) { const f = $('feed'), d = document.createElement('div'); d.innerHTML = `<span class="${a.team ? 'red' : 'blue'}">${a.name}</span> ${head ? '◎' : '›'} <span class="${b.team ? 'red' : 'blue'}">${b.name}</span>`;
     f.prepend(d); while (f.children.length > 5) f.lastChild.remove(); setTimeout(() => d.remove(), 5000); },
