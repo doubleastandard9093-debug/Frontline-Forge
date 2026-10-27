@@ -172,7 +172,7 @@ export class Game {
     if ((consume('KeyR', 'btn_reload') || w.ammo <= 0) && w.ammo < w.mag) { w.reloading = w.reload; this.hooks.toast('Reloading'); return; }
     if (!input.fire || this.fireT > 0) return;
     if (!w.auto) { if (this.semiHeld) return; this.semiHeld = true; }
-    this.fireT = 60 / w.rpm; w.ammo--;
+    this.fireT = 60 / w.rpm; w.ammo--; this.player.firedT = 1.5;
     const moving = Math.hypot(input.move.x, input.move.y) > 0.1, ads = this.adsT > 0.5;
     const spread = w.spread * (ads ? 0.3 : 1) * (moving ? 1.6 : 1) * (this.player.onGround ? 1 : 2);
     for (let i = 0; i < (w.pellets || 1); i++) {
@@ -312,7 +312,7 @@ export class Game {
       if (g.reloading > 0) { g.reloading -= dt; if (g.reloading <= 0) g.ammo = g.mag; }
       else if (g.ammo <= 0) g.reloading = g.reload * 1.2;
       else if (g.cd <= 0 && u.seeT > 0.45) {
-        g.cd = 60 / g.rpm * (g.auto ? 1.6 : 1.2); g.ammo--;
+        g.cd = 60 / g.rpm * (g.auto ? 1.6 : 1.2); g.ammo--; u.firedT = 1.5;
         const vis = this.canSee(u, t); const from = u.pos.clone(); from.y += 1.3;
         if (vis !== true) { if (['build', 'vehicle'].includes(vis.object?.userData.kind)) this.damageAt(vis, g.dmg, u); this.tracer(from, vis.point); }
         else { const chance = u.skill * (1 - Math.min(dist / (g.range * 1.6), 0.8)) * (t.isPlayer ? 0.55 : 0.6);
@@ -397,6 +397,9 @@ export class Game {
     }
     for (const tr of this.tracers) { tr.t -= dt; if (tr.t <= 0) { this.scene.remove(tr.l); tr.l.geometry.dispose(); } } this.tracers = this.tracers.filter(t => t.t > 0);
     this.hudT = (this.hudT || 0) - dt; if (this.hudT <= 0) { this.hudT = 0.2; this.hooks.hud(this); }
+    this.trkT = (this.trkT || 0) - dt; if (this.trkT <= 0) { this.trkT = 0.1; // motion tracker: allies always, enemies only when moving or firing
+      for (const u of this.units) { u.firedT = (u.firedT || 0) - 0.1; u.spd = u.prev ? Math.hypot(u.pos.x - u.prev.x, u.pos.z - u.prev.z) / 0.1 : 0; u.prev = { x: u.pos.x, z: u.pos.z }; }
+      this.hooks.tracker(this); }
     if (first) input.pressed.clear();
   }
   // Weapon pickups: two-gun carry limit; F swaps the gun in hand for one on the ground.

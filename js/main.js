@@ -30,6 +30,19 @@ const hooks = {
     $('dead').classList.toggle('hidden', P.alive);
     $('goal').textContent = `${g.map.name} · ${g.mode === 'coop' ? 'Co-op vs Bots' : g.map.mode} · first to ${g.map.scoreLimit}`;
   },
+  tracker(g) {
+    const c = $('tracker'), x = c.getContext('2d'), R = c.width / 2, range = 25, P = g.player; x.clearRect(0, 0, c.width, c.height);
+    x.fillStyle = 'rgba(10,40,60,.45)'; x.beginPath(); x.arc(R, R, R - 1, 0, 7); x.fill(); x.strokeStyle = 'rgba(127,216,255,.6)'; x.lineWidth = 1;
+    for (const r of [0.33, 0.66, 1]) { x.beginPath(); x.arc(R, R, (R - 2) * r, 0, 7); x.stroke(); }
+    x.beginPath(); x.moveTo(R, 2); x.lineTo(R, c.height - 2); x.moveTo(2, R); x.lineTo(c.width - 2, R); x.stroke();
+    const cy = Math.cos(P.yaw), sy = Math.sin(P.yaw);
+    for (const u of g.units) { if (u === P || !u.alive) continue; const dx = u.pos.x - P.pos.x, dz = u.pos.z - P.pos.z; if (Math.hypot(dx, dz) > range) continue;
+      if (u.team !== P.team && u.spd < 1.2 && u.firedT <= 0) continue; // crouch-walking/still enemies stay off the tracker
+      const rx = dx * cy - dz * sy, rz = dx * sy + dz * cy; x.fillStyle = u.team === P.team ? '#ffd84a' : '#ff3b30';
+      x.beginPath(); x.arc(R + rx / range * (R - 4), R + rz / range * (R - 4), 4, 0, 7); x.fill(); }
+    for (const v of g.vehicles) if (v.alive) { const dx = v.pos.x - P.pos.x, dz = v.pos.z - P.pos.z; if (Math.hypot(dx, dz) > range) continue; const rx = dx * cy - dz * sy, rz = dx * sy + dz * cy;
+      x.fillStyle = v.team === P.team ? '#ffd84a' : '#ff3b30'; x.fillRect(R + rx / range * (R - 4) - 5, R + rz / range * (R - 4) - 5, 10, 10); }
+  },
   toast(m) { toastEl.textContent = m; clearTimeout(toastT); toastT = setTimeout(() => toastEl.textContent = '', 1200); },
   hitmark(head) { const h = $('hitm'); h.classList.toggle('head', head); h.style.opacity = 1; setTimeout(() => h.style.opacity = 0, 120); },
   shieldPop() { const h = $('pop'); h.classList.remove('go'); void h.offsetWidth; h.classList.add('go'); },
