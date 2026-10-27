@@ -508,6 +508,7 @@ export class Game {
     this.near = null; this.hijack = null; if (!P.vehicle && P.alive) for (const v of this.vehicles) { if (!v.alive) continue; const d = v.pos.distanceTo(P.pos);
       if (v.team === P.team && d < 5 && v.seats.some(s => !s.unit)) { this.near = v; break; }
       if (v.team !== P.team && (v.K.mode === 'car' || v.K.mode === 'tracked' || v.K.mode === 'walker' || v.K.mode === 'boat') && d < v.K.r + 2.2 && Math.abs(v.pos.y - P.pos.y) < 4) this.hijack = v; }
+    if (this.hf) this.hf.vehicleFx(this, dt);
     for (const v of this.vehicles) if (v.alive) v.empT = Math.max(0, (v.empT || 0) - dt); else { v.respawn -= dt; if (v.respawn <= 0) this.respawnVehicle(v); }
     // view-distance LOD: skip drawing far bots
     const lod = this.tier === 'low' ? 85 : 160; for (const u of this.units) if (u.mesh && u.alive) u.mesh.visible = !u.vehicle && u.pos.distanceTo(P.pos) < lod;

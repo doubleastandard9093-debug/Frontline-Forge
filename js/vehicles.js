@@ -52,7 +52,7 @@ export function buildVehicleMesh(kind, m, team) {
   g.userData.parts = parts; return g;
 }
 export function createVehicle(game, kind, x, z, team, id) {
-  const K = KINDS[kind], mesh = buildVehicleMesh(kind, (c, k) => game.m(c, k), team);
+  const K = KINDS[kind], mesh = buildVehicleMesh(kind, game.hf ? game.hf.vmat : (c, k) => game.m(c, k), team); if (game.hf) game.hf.detailVehicle(kind, mesh, team);
   const v = { id, kind, K, team, pos: new THREE.Vector3(x, kind === 'jet' ? 0.8 : kind === 'heli' ? 1.2 : 0, z), vy: 0, yaw: team === 0 ? 0 : Math.PI, pitch: 0, roll: 0, aimYaw: 0, aimPitch: 0,
     speed: 0, hp: K.hp, seats: K.seats.map(role => ({ role, unit: null })), mesh, alive: true, cd: [0, 0, 0], ammo: K.weapons.map(w => w.ammoMax || 0), walk: 0, home: [x, z] };
   mesh.position.copy(v.pos); game.scene.add(mesh);

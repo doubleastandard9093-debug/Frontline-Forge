@@ -40,7 +40,7 @@ export const SETS = {
   metal: () => makeSet('metal', (x, y, n, h) => { const brush = Math.sin(y * 0.9 + h * 6) * 0.04, panel = (x % (n / 2) < 2 || y % (n / 2) < 2) ? 1 : 0, rivet = ((x % (n / 2) - 10) ** 2 + (y % (n / 4) - 10) ** 2 < 9) ? 1 : 0;
     const v = 120 + (h - 0.5) * 40 + brush * 200 - panel * 60 + rivet * 30; return { c: [v * 0.92, v * 0.96, v], h: h * 0.15 - panel * 0.6 + rivet * 0.8 + brush, r: clamp(0.35 + h * 0.3 + panel * 0.2) }; }, 23, 4),
   paint: () => makeSet('paint', (x, y, n, h) => { const panel = (x % (n / 2) < 2 || y % (n / 3 | 0) < 2) ? 1 : 0, chip = h > 0.86 ? 1 : 0, dirt = clamp((y / n) * 0.6 + h * 0.4 - 0.55);
-    const v = 235 - dirt * 90 - panel * 120; const c = chip ? [120, 120, 118] : [v, v, v]; return { c, h: -panel * 0.7 - chip * 0.3 + h * 0.05, r: clamp(0.45 + dirt * 0.4 + chip * 0.3) }; }, 37, 4),
+    const v = 205 - dirt * 80 - panel * 110; const c = chip ? [120, 120, 118] : [v, v, v]; return { c, h: -panel * 0.7 - chip * 0.3 + h * 0.05, r: clamp(0.45 + dirt * 0.4 + chip * 0.3) }; }, 37, 4),
   wood: () => makeSet('wood', (x, y, n, h) => { const plank = (y % (n / 4)) < 2 ? 1 : 0, grain = Math.sin(x * 0.08 + h * 14) * 0.5 + 0.5, v = 0.75 + grain * 0.25 - plank * 0.5;
     return { c: [150 * v, 104 * v, 60 * v], h: grain * 0.3 - plank, r: clamp(0.75 + grain * 0.1) }; }, 41, 3),
   fabric: () => makeSet('fabric', (x, y, n, h) => { const weave = ((x >> 1) + (y >> 1)) % 2 ? 0.08 : -0.08, v = 200 + weave * 200 + (h - 0.5) * 50; return { c: [v, v, v], h: weave + h * 0.2, r: 0.95 }; }, 53, 2),
@@ -130,7 +130,7 @@ export function worldUV(geo, w, h, d, tile = 3) {
 const BMAT = {};
 function bmat(kind, color) { const k = kind + color; if (BMAT[k]) return BMAT[k];
   const set = { concrete: 'concrete', metal: 'metal', wood: 'wood' }[kind] || 'concrete';
-  return (BMAT[k] = pbr(set, new THREE.Color(color).lerp(new THREE.Color(0xffffff), 0.25), { metalness: set === 'metal' ? 0.75 : 0, roughness: 1, normalScale: set === 'wood' ? 1.2 : 1 })); }
+  return (BMAT[k] = pbr(set, new THREE.Color(color).lerp(new THREE.Color(0xffffff), set === 'metal' ? 0.45 : 0.25), { metalness: set === 'metal' ? 0.45 : 0, roughness: 1, env: set === 'metal' ? 1.4 : 1, normalScale: set === 'wood' ? 1.2 : 1 })); }
 let grimeTex = null, signTex = null;
 function grime() { if (grimeTex) return grimeTex; const c = document.createElement('canvas'); c.width = 64; c.height = 256; const g = c.getContext('2d');
   const gr = g.createLinearGradient(0, 0, 0, 256); gr.addColorStop(0, 'rgba(30,25,18,0)'); gr.addColorStop(0.7, 'rgba(30,25,18,.25)'); gr.addColorStop(1, 'rgba(25,20,12,.6)'); g.fillStyle = gr; g.fillRect(0, 0, 64, 256);
@@ -157,4 +157,59 @@ export function building(x, z, w, d, h, color, kind) {
   if (h > 2.5 && w > 3 && ((x * 7 + z * 13) & 3) === 0) { const s = new THREE.Mesh(new THREE.PlaneGeometry(1.6, 0.8), signM); s.position.set(x, Math.min(h - 0.8, 2.2), z + d / 2 + 0.02); extras.push(s); }
   for (const e of extras) { e.castShadow = e.geometry.type === 'BoxGeometry'; e.receiveShadow = true; }
   return { mesh, extras };
+}
+
+// ---------- vehicles: PBR paint + real metal, extra detail, damage states ----------
+const VM = {};
+// Drop-in for game.m inside buildVehicleMesh: 'metal' at the team colors = painted armor, dark = bare metal.
+export function vmat(color, kind) { const k = color + ':' + kind; if (VM[k]) return VM[k];
+  const dark = color === 0x30343a;
+  return (VM[k] = dark ? pbr('metal', 0x8a9099, { metalness: 0.85, roughness: 1, env: 1.3 }) : pbr('paint', color, { physical: true, clearcoat: 0.5, metalness: 0.25, roughness: 1, env: 1.1 })); }
+let lightM = null, rubberM = null;
+export function detailVehicle(kind, g, team) {
+  const P = g.userData.parts, dark = vmat(0x30343a, 'metal');
+  lightM = lightM || new THREE.MeshStandardMaterial({ color: 0xfff6dd, emissive: 0xfff0c0, emissiveIntensity: 1.5, roughness: 0.2 });
+  rubberM = rubberM || new THREE.MeshStandardMaterial({ color: 0x1c1c1c, roughness: 0.95 });
+  const add = (geo, m, x, y, z, parent = g, rot) => { const o = new THREE.Mesh(geo, m); o.position.set(x, y, z); if (rot) o.rotation.set(rot[0], rot[1], rot[2]); o.castShadow = true; parent.add(o); return o; };
+  const cyl = (r, l, s = 10) => new THREE.CylinderGeometry(r, r, l, s), box = (w, h, d) => new THREE.BoxGeometry(w, h, d);
+  if (kind === 'tank') {
+    for (const s of [-1, 1]) for (let i = 0; i < 6; i++) add(cyl(0.36, 0.3, 12), rubberM, s * 1.6, 0.42, -2.1 + i * 0.84, g, [0, 0, Math.PI / 2]);
+    for (const s of [-1, 1]) add(box(0.7, 0.06, 5.5), dark, s * 1.6, 0.88, 0); // track guards
+    add(cyl(0.34, 0.6, 12), dark, 0, 0.05, -3.9, P.turret, [Math.PI / 2, 0, 0]); // muzzle brake
+    add(box(0.6, 0.3, 0.5), dark, -0.7, 0.55, 0.6, P.turret); add(cyl(0.01, 1.4, 4), dark, -0.8, 1.2, 1.0, P.turret);
+    for (const s of [-1, 1]) add(box(0.2, 0.12, 0.08), lightM, s * 1.1, 0.95, -2.62);
+    add(box(1.6, 0.4, 0.6), dark, 0, 1.1, 2.4); // engine deck
+  } else if (kind === 'buggy') {
+    for (const s of [-1, 1]) { add(box(0.2, 0.1, 0.05), lightM, s * 0.6, 0.85, -1.72); add(box(0.08, 0.5, 0.08), dark, s * 0.85, 1.2, 1.4); }
+    add(box(1.7, 0.08, 0.08), dark, 0, 1.45, 1.4); add(box(1.8, 0.25, 0.4), dark, 0, 0.6, -1.8); // roll bar + bumper
+    add(cyl(0.06, 0.6, 8), dark, 0.7, 0.9, 1.75, g, [Math.PI / 2, 0, 0]);
+  } else if (kind === 'mech') {
+    for (const s of [-1, 1]) { add(cyl(0.07, 1.2, 8), dark, s * 1.25, 2.2, -0.35, g, [0.2, 0, 0]); add(box(0.4, 0.18, 0.06), lightM, s * 0.45, 2.85, -0.95); }
+    add(cyl(0.12, 0.5, 10), dark, 1.55, -0.1, -1.6, P.torso, [Math.PI / 2, 0, 0]);
+  } else if (kind === 'boat') {
+    add(box(2.7, 0.15, 6.1), rubberM, 0, -0.05, 0); add(box(0.25, 0.1, 0.05), lightM, 0, 1.4, -3.5); add(cyl(0.02, 1.6, 4), dark, 0.6, 2.3, 0.8);
+  } else if (kind === 'heli') {
+    add(cyl(0.25, 0.4, 10), dark, 0, 0.85, 0); add(box(0.5, 0.5, 1.2), dark, 0, 0.6, 1.4); add(box(0.15, 0.08, 0.05), lightM, 0, -0.5, -1.86);
+    for (const s of [-1, 1]) add(cyl(0.18, 1.0, 8), dark, s * 1.3, -0.2, 0.3, g, [Math.PI / 2, 0, 0]); // rocket pods
+  } else if (kind === 'jet') {
+    for (const s of [-1, 1]) { add(cyl(0.12, 1.4, 8), dark, s * 2.2, -0.2, 0.4, g, [Math.PI / 2, 0, 0]); add(box(0.4, 0.5, 2.2), vmat(team === 0 ? 0x5a6e48 : 0x7a4a3c, 'metal'), s * 0.75, 0, 1.0); }
+    add(cyl(0.45, 0.6, 12), dark, 0, 0, 3.75, g, [Math.PI / 2, 0, 0]);
+  }
+}
+// damage: smoke under 60% hp, fire under 30%, scorched paint; pooled sprites, capped on phones.
+let fxTex = null; const puffs = []; const MAXP = isPhone ? 24 : 80;
+function puffTex() { if (fxTex) return fxTex; const c = document.createElement('canvas'); c.width = c.height = 64; const g = c.getContext('2d'), gr = g.createRadialGradient(32, 32, 2, 32, 32, 30);
+  gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(0.5, 'rgba(255,255,255,.45)'); gr.addColorStop(1, 'rgba(255,255,255,0)'); g.fillStyle = gr; g.fillRect(0, 0, 64, 64); return (fxTex = new THREE.CanvasTexture(c)); }
+function puff(scene, pos, fire) { let p = puffs.find(q => q.life <= 0);
+  if (!p) { if (puffs.length >= MAXP) return; p = { s: new THREE.Sprite(new THREE.SpriteMaterial({ map: puffTex(), transparent: true, depthWrite: false })), life: 0 }; puffs.push(p); }
+  if (p.s.parent !== scene) scene.add(p.s); p.fire = fire; p.life = p.max = fire ? 0.6 : 2.2; p.s.position.copy(pos).add(new THREE.Vector3((Math.random() - 0.5) * 0.6, 0, (Math.random() - 0.5) * 0.6)); p.s.visible = true;
+  p.s.material.color.set(fire ? 0xffa040 : 0x3a3a3a); p.s.material.blending = fire ? THREE.AdditiveBlending : THREE.NormalBlending; }
+export function vehicleFx(game, dt) {
+  for (const v of game.vehicles) { const f = v.alive ? v.hp / v.K.hp : 1, st = f < 0.3 ? 2 : f < 0.6 ? 1 : 0;
+    if (st !== (v.dmgState || 0)) { v.dmgState = st; v.mesh.traverse(o => { if (!o.isMesh || !o.material.isMeshStandardMaterial) return; if (!o.userData.m0) o.userData.m0 = o.material;
+      if (st === 2) { const m = o.userData.m0.clone(); m.color.multiplyScalar(0.45); m.roughness = 1; if (m.clearcoat) m.clearcoat = 0; o.material = m; } else o.material = o.userData.m0; }); }
+    if (!v.alive || !st) continue; v.fxT = (v.fxT || 0) - dt; if (v.fxT > 0) continue; v.fxT = st === 2 ? 0.08 : 0.2;
+    const top = v.pos.clone(); top.y += v.K.h * 0.9; puff(game.scene, top, false); if (st === 2) puff(game.scene, top, true); }
+  for (const p of puffs) { if (p.life <= 0) continue; p.life -= dt; const t = 1 - p.life / p.max; p.s.position.y += dt * (p.fire ? 2.5 : 1.6); p.s.scale.setScalar((p.fire ? 0.8 : 1.2) + t * (p.fire ? 0.6 : 3));
+    p.s.material.opacity = (p.fire ? 0.9 : 0.55) * (1 - t); if (p.life <= 0) p.s.visible = false; }
 }
