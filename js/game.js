@@ -153,7 +153,7 @@ export class Game {
       if (w.type !== 'pistol') add(new THREE.BoxGeometry(0.05, 0.12, 0.07), 0, -0.1, -L * 0.55);
       if (w.adsZoom > 1.2) add(new THREE.CylinderGeometry(0.03, 0.03, 0.2, 8), 0, 0.08, -0.15).rotation.x = Math.PI / 2;
       this.flash = new THREE.Mesh(new THREE.SphereGeometry(0.05, 6, 4), new THREE.MeshBasicMaterial({ color: 0xffd27a })); this.flash.position.set(0, 0, -L - 0.03); this.flash.visible = false; this.view.add(this.flash); }
-    this.view.scale.setScalar(0.6); this.view.position.set(0.22, -0.2, -0.35); this.hooks.hud(this);
+    this.view.scale.setScalar(0.45); this.view.position.set(0.22, -0.2, -0.35); this.hooks.hud(this);
   }
   aimRay(spread) {
     const d = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion);
