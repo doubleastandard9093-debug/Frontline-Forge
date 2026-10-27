@@ -2,7 +2,7 @@ import { GUNS, ATTACH, RANKS, STATS, xpForRank } from './data.js';
 import { MAPS } from './maps.js';
 import { load, save, exportCode, importCode, fresh } from './save.js';
 import { pickTier } from './gfx.js';
-import { initInput } from './input.js';
+import { initInput, gyro, enableGyro, gyroSupported, setGyroActive } from './input.js';
 import { Game } from './game.js';
 import { Sfx } from './audio.js';
 
@@ -74,6 +74,19 @@ const hooks = {
 $('resume').onclick = () => { show(null); game.paused = false; };
 $('quit').onclick = () => { game.dispose(); show('menu'); };
 initInput(canvas, () => game && game.running && !game.paused);
+setGyroActive(() => game && game.running && !game.paused && !game.choosing);
+Object.assign(gyro, { on: !!S.gyro, sens: S.gyroSens ?? 1, invert: !!S.gyroInv, adsOnly: !!S.gyroAds });
+const isTouch = matchMedia('(pointer: coarse)').matches;
+function gyroStatus(t) { $('gyroNote').textContent = t || (!gyroSupported() ? 'Gyro needs a phone and HTTPS (the GitHub Pages link works; add to Home Screen from Safari).' : gyro.granted ? 'Gyro ready. Tilt to fine-aim; touch look still works.' : 'Tap Enable gyro to allow motion access.'); }
+function askGyro() { return enableGyro().then(ok => { if (ok) { S.gyro = true; gyro.on = true; S.gyroAsked = true; save(S); } else gyroStatus('Motion access was denied. On iPhone: remove and re-add the Home Screen app, or allow Motion & Orientation for Safari, then tap Enable gyro again.'); renderGyro(); return ok; }); }
+function renderGyro() { $('gyroOn').checked = gyro.on; $('gyroSens').value = gyro.sens; $('gyroInv').checked = gyro.invert; $('gyroAds').checked = gyro.adsOnly; gyroStatus(); }
+$('gyroBtn').onclick = () => askGyro();
+$('gyroOn').onchange = e => { if (e.target.checked && !gyro.granted) { askGyro(); return; } gyro.on = S.gyro = e.target.checked; save(S); };
+$('gyroSens').oninput = e => { gyro.sens = S.gyroSens = +e.target.value; save(S); };
+$('gyroInv').onchange = e => { gyro.invert = S.gyroInv = e.target.checked; save(S); };
+$('gyroAds').onchange = e => { gyro.adsOnly = S.gyroAds = e.target.checked; save(S); };
+// returning players who already enabled it: re-request on the first tap (iOS forgets per session, prompt shows only once)
+if (S.gyro) addEventListener('touchend', function once() { removeEventListener('touchend', once); enableGyro(); }, { passive: true });
 
 function drawMap(g, c, full) {
   const x = c.getContext('2d'), W = c.width, H = c.height, P = g.player, size = g.map.size;
@@ -103,7 +116,8 @@ function applyResult(r) {
   show('results');
 }
 
-function startMatch(id) { $('spawnsel').classList.add('hidden'); $('spawnsel').dataset.k = ''; game = game || new Game(canvas, tier, S, hooks); game.paused = false; show(null); game.start(id, mode); game.sfx = (n, p) => sfx.play(n, p, p && game.camera.position); game.engine = (k, t) => sfx.setEngine(k, t); }
+function startMatch(id) {
+  if (isTouch && !S.gyroAsked && gyroSupported()) { S.gyroAsked = true; save(S); askGyro(); } /* first match start: ask inside this tap */ $('spawnsel').classList.add('hidden'); $('spawnsel').dataset.k = ''; game = game || new Game(canvas, tier, S, hooks); game.paused = false; show(null); game.start(id, mode); game.sfx = (n, p) => sfx.play(n, p, p && game.camera.position); game.engine = (k, t) => sfx.setEngine(k, t); }
 
 function rankHtml() {
   const prev = S.rank ? xpForRank(S.rank - 1) : 0, next = xpForRank(S.rank), pct = Math.min(100, (S.xp - prev) / (next - prev) * 100);
@@ -119,7 +133,7 @@ function render(id) {
   if (id === 'armory') renderShop();
   if (id === 'stats') renderStats();
   if (id === 'settings') {
-    $('gLow').classList.toggle('on', tier === 'low'); $('gHigh').classList.toggle('on', tier === 'high'); $('sens').value = S.sens || 1; $('vol').value = S.vol ?? 0.7;
+    $('gLow').classList.toggle('on', tier === 'low'); $('gHigh').classList.toggle('on', tier === 'high'); $('sens').value = S.sens || 1; $('vol').value = S.vol ?? 0.7; renderGyro();
   }
 }
 function renderShop() {

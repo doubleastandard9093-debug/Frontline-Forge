@@ -82,6 +82,10 @@
   <p class="note">Low is lighter and best for phones. Changing it reloads the game.</p>
   <div class="row"><span>Volume</span><input id="vol" type="range" min="0" max="1" step="0.05"></div>
   <div class="row"><span>Look sensitivity</span><input id="sens" type="range" min="0.3" max="2.5" step="0.1"></div>
+  <h3>Gyro aim (phone)</h3>
+  <div class="row"><button id="gyroBtn">Enable gyro</button><label><input type="checkbox" id="gyroOn"> On</label><label><input type="checkbox" id="gyroInv"> Invert Y</label><label><input type="checkbox" id="gyroAds"> ADS only</label></div>
+  <div class="row"><span>Gyro sensitivity</span><input id="gyroSens" type="range" min="0.2" max="3" step="0.1"></div>
+  <p class="note" id="gyroNote"></p>
   <h3>Save</h3>
   <div class="row"><button id="exp">Export save</button><button id="imp">Import save</button><button id="wipe" class="danger">Reset</button></div>
   <textarea id="code" placeholder="Save code appears here, or paste one to import"></textarea>
