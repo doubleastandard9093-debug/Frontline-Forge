@@ -5,7 +5,7 @@ import { pickTier } from './gfx.js';
 import { initInput, gyro, enableGyro, gyroSupported, setGyroActive } from './input.js';
 import { Game } from './game.js';
 import { Sfx } from './audio.js';
-import { RARITY, ELEMENTS, sellValue, gunLine } from './loot.js';
+import { RARITY, ELEMENTS, sellValue, gunLine, redText, reqRank } from './loot.js';
 import { BACKPACK } from './save.js';
 import { CLASSES, skillPts, lv, branchSpent, canLearn, switchBuild } from './classes.js';
 import { RENTALS, RENT_PLANS, DURABLE, REPAIR, CAMOS, RETICLES, CRATE_PRICE, MAX_PRESTIGE, gpMult, careerResult, weekly, prestige, openCrate, today } from './career.js';
@@ -159,8 +159,8 @@ function renderShop() {
   const eqName = id => id[0] === 'L' ? (S.inv.find(x => 'L' + x.uid === id)?.name || '?') : (GUNS[id] || RENTALS[id])?.name;
   $('backpack').innerHTML = `<h3>Backpack ${S.inv.length}/${BACKPACK}</h3><p class="note">Loot drops from enemies and chests. Equipped: ${eqName(S.loadout.primary)} / ${eqName(S.loadout.secondary)}</p>` + (S.inv.length ? '' : '<p class="note">Empty. Kill enemies and open chests to find loot guns.</p>') +
     S.inv.slice().sort((a, b) => b.rarity - a.rarity).map(g => { const id = 'L' + g.uid, slot = g.type === 'pistol' ? 'secondary' : 'primary', eq = S.loadout[slot] === id;
-      return `<div class="item loot" style="border-left:4px solid ${RARITY[g.rarity].css}"><div class="nm"><b style="color:${RARITY[g.rarity].css}">${g.name}</b> <small>${RARITY[g.rarity].name} · Lv ${g.lvl} · ${gunLine(g)}</small></div>
-      <button data-leq="${id}" class="${eq ? 'on' : ''}">${eq ? 'Equipped' : 'Equip ' + slot}</button><button data-sell="${g.uid}" class="danger">Sell ${sellValue(g)} GP</button></div>`; }).join('');
+      return `<div class="item loot" style="border-left:4px solid ${RARITY[g.rarity].css}"><div class="nm"><b style="color:${RARITY[g.rarity].css}">${g.name}</b> <small>${RARITY[g.rarity].name} · Lv ${g.lvl}${reqRank(g) ? ` · Req. ${RANKS[reqRank(g)]}` : ''} · ${gunLine(g)}</small>${redText(g) ? '<br>' + redText(g) : ''}</div>
+      <button data-leq="${id}" class="${eq ? 'on' : ''}" ${S.rank < reqRank(g) && !S.prestige ? 'disabled' : ''}>${eq ? 'Equipped' : S.rank < reqRank(g) && !S.prestige ? 'Locked' : 'Equip ' + slot}</button><button data-sell="${g.uid}" class="danger">Sell ${sellValue(g)} GP</button></div>`; }).join('');
   document.querySelectorAll('[data-leq]').forEach(b => b.onclick = () => { const g = S.inv.find(x => 'L' + x.uid === b.dataset.leq); S.loadout[g.type === 'pistol' ? 'secondary' : 'primary'] = b.dataset.leq; save(S); renderShop(); });
   document.querySelectorAll('[data-sell]').forEach(b => b.onclick = () => { const uid = +b.dataset.sell, g = S.inv.find(x => x.uid === uid); S.gp += Math.round(sellValue(g) * (S.cls === 'sparkwright' ? 1 + 0.1 * lv(S, 'salvage') : 1)); S.inv = S.inv.filter(x => x !== g);
     if (S.loadout.primary === 'L' + uid) S.loadout.primary = 'kr4'; if (S.loadout.secondary === 'L' + uid) S.loadout.secondary = 'vx9'; save(S); renderShop(); });

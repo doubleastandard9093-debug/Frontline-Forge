@@ -3,7 +3,7 @@ import { GUNS, ATTACH, BUILD, GRID } from './data.js';
 import { MAPS } from './maps.js';
 import { mat, makeRenderer, isPhone } from './gfx.js';
 import { Nav } from './nav.js';
-import { RARITY, ELEMENTS, genGun } from './loot.js';
+import { RARITY, ELEMENTS, genGun, MAKERS, LEGENDS, reqRank } from './loot.js';
 import { BACKPACK } from './save.js';
 import { CLASSES, lv } from './classes.js';
 import { installZombies } from './zombies.js';
@@ -109,6 +109,7 @@ export class Game {
   makeWeapon(id) {
     const base = this.gunDef(id), att = base.loot ? {} : this.save.attach[id] || {}; const w = Object.assign({ id }, base); w.adsZoom = base.zoom || 1.15;
     for (const a of Object.values(att)) { const mod = ATTACH[a]?.mod || {}; for (const k in mod) w[k] = k === 'adsZoom' ? Math.max(w[k], mod[k]) : w[k] * mod[k]; }
+    if (w.loot) { w.legend = w.legend || (w.rarity === 4 && LEGENDS[w.name] ? w.name : null); w.gimmick = w.gimmick ?? Object.values(MAKERS).find(m => m.name === w.maker)?.gimmick; w.affixes = w.affixes || []; }
     w.dmg *= durMult(this.save, id); if (this.sk) w.reload *= 1 - 0.08 * this.sk('nimble'); w.mag = Math.round(w.mag); w.reload *= 1 - this.save.stats.reload * 0.04; w.ammo = w.mag; w.reloading = 0; return w;
   }
   makeUnit(team, isPlayer, name) {
@@ -199,7 +200,7 @@ export class Game {
     if (w.pick) { if (input.fire && this.fireT <= 0) { this.fireT = 0.45; this.swing = 0.25; this.aimRay(0); this.ray.far = 3;
         const h = this.firstHit(this.player); if (h) this.damageAt(h, 30, this.player, false, true); } return; }
     if (w.reloading > 0) { w.reloading -= dt; if (w.reloading <= 0) { if (w.reserve !== undefined) { const t = Math.min(w.mag - w.ammo, w.reserve); w.ammo += t; w.reserve -= t; } else w.ammo = w.mag; this.hooks.hud(this); } return; }
-    if ((consume('KeyR', 'btn_reload') || w.ammo <= 0) && w.ammo < w.mag && !(w.reserve <= 0)) { w.reloading = w.reload; this.sfx('reload'); this.hooks.toast('Reloading'); return; }
+    if ((consume('KeyR', 'btn_reload') || w.ammo <= 0) && w.ammo < w.mag && !(w.reserve <= 0)) { w.reloading = w.reload; if (w.gimmick === 'throw') this.throwGun(w); this.sfx('reload'); this.hooks.toast('Reloading'); return; }
     w.bloom = Math.max(0, (w.bloom || 0) - dt * w.spread * (w.sinceShot > 0.25 ? 4 : 0.8)); w.sinceShot = (w.sinceShot || 0) + dt; if (w.sinceShot > 0.35) w.shotN = 0;
     if (!input.fire || this.fireT > 0) return;
     if (!w.auto) { if (this.semiHeld) return; this.semiHeld = true; }
@@ -208,20 +209,31 @@ export class Game {
     const spread = (w.spread + (w.bloom || 0)) * (ads ? 0.3 : 1) * (moving ? (ads ? 1.15 : 1.8) : 1) * (this.player.onGround ? 1 : 2);
     w.bloom = Math.min(w.spread * 1.5, (w.bloom || 0) + w.spread * 0.15); w.sinceShot = 0;
     for (let i = 0; i < (w.pellets || 1); i++) {
-      const d = this.aimRay(w.pellets ? w.spread : spread); const h = this.firstHit(this.player);
+      const d = this.aimRay(w.pellets ? w.spread : spread); if (w.gimmick === 'homing') this.homeRay(d); const h = this.firstHit(this.player);
       const end = h ? h.point : this.camera.position.clone().addScaledVector(d, 120);
-      if (h && h.distance <= w.range * 1.5) this.damageAt(h, w.dmg * (h.distance > w.range ? 0.6 : 1), this.player, h.object.userData.head);
+      const sun = w.legend === 'Seventh Sun' && (w.shotN || 0) % 7 === 6 ? 3 : 1;
+      if (h && h.distance <= w.range * 1.5) { this.damageAt(h, w.dmg * sun * (h.distance > w.range ? 0.6 : 1), this.player, h.object.userData.head); if (w.gimmick === 'ricochet' && h.object.userData.kind === 'unit' && Math.random() < 0.3) this.ricochet(h.object.userData.unit, w.dmg * 0.5); }
       this.tracer(this.view.localToWorld(new THREE.Vector3(0, 0, -0.6)), end);
     }
     { const k = Game.recoilKick(w, w.shotN || 0), m = (ads ? 0.6 : 1) * (1 - 0.15 * this.sk('steady')); w.shotN = (w.shotN || 0) + 1; this.recoilP += k[1] * m; this.player.yaw += k[0] * m + (Math.random() - 0.5) * w.recoil * 0.08; } this.kick = 1;
     if (this.flash) { this.flash.visible = true; setTimeout(() => this.flash && (this.flash.visible = false), 40); }
     this.hooks.hud(this);
   }
+  // Loot gimmicks
+  lootMul(w, t, head) { if (!w?.loot) return 1; const A = w.affixes || []; let m = 1;
+    if (head && A.includes('headhunter')) m *= 1.25; if (t.sh > 0 && A.includes('breaker')) m *= 1.25; if (t.hp < t.maxHp * 0.35 && A.includes('executioner')) m *= 1.2;
+    if (w.legend === 'Grudgeholder') { w.grudge = w.grudgeT === t ? Math.min(5, (w.grudge || 0) + 1) : 0; w.grudgeT = t; m *= 1 + 0.1 * w.grudge; } return m; }
+  homeRay(d) { const P = this.player, o = this.camera.position; let best = null, bd = 0.1; for (const e of this.units) if (e.alive && e.team !== P.team) { const t = e.pos.clone().setY(e.pos.y + 1.3).sub(o), L = t.length(); if (L > 70) continue; const a = t.normalize().angleTo(d); if (a < bd) { bd = a; best = t; } }
+    if (best) { d.lerp(best, 0.6).normalize(); this.ray.set(o, d); } }
+  ricochet(from, dmg) { let best = null, bd = 8; for (const e of this.units) if (e.alive && e !== from && e.team !== this.player.team) { const x = e.pos.distanceTo(from.pos); if (x < bd) { bd = x; best = e; } }
+    if (!best) return; this.hurt(best, dmg, this.player, false); if (this.tier !== 'low') this.tracer(from.pos.clone().setY(from.pos.y + 1.2), best.pos.clone().setY(best.pos.y + 1.2)); }
+  throwGun(w) { this.aimRay(0); this.ray.far = 25; const h = this.firstHit(this.player); const p = h ? h.point : this.camera.position.clone().addScaledVector(this.ray.ray.direction, 18);
+    this.explode(p, Math.round(w.dmg * Math.max(3, w.mag - w.ammo) * 0.35), 3.5, this.player); w.reloading *= 0.6; this.hooks.toast('Brakka toss!'); }
   damageAt(h, dmg, src, head, pick) {
     const ud = h.object.userData;
     const w = src?.isPlayer ? this.slots[this.slot] : null;
     if (ud.kind === 'unit') { const ch = this.cls === 'sparkwright' ? 0.06 * lv(this.save, 'charged') : 0, el = w?.elem || (ch && !w?.pick ? 'shock' : null);
-    if (w && el && ud.unit.team !== src.team && Math.random() < (w.elem ? w.elemChance : 0) + ch) { ud.unit.dot = { elem: el, dps: (w.elemDps || Math.round(w.dmg * 0.5)) * (1 + 0.2 * this.sk('conductor')), t: 4 + this.sk('catalyst'), acc: 0, src }; } const P = this.player, bonus = src === P ? (head ? 1 + 0.12 * lv(this.save, 'deadeye') * (this.cls === 'ghostwire') : 1) * (P.cloakShot ? 3 + 0.5 * this.sk('ambush') : 1) * (1 + 0.04 * this.sk('stopping')) * (w && (w.type === 'rifle' || w.type === 'sniper') ? 1 + 0.05 * this.sk('longshot') : 1) * (head && ud.unit.sh <= 0 && this.sk('execution') ? 1.5 : 1) * (ud.unit.dot ? 1 + 0.05 * this.sk('amp') : 1) : 1; if (src === P) P.cloakShot = false; this.hurt(ud.unit, dmg * (head ? 2 : 1) * bonus, src, head); }
+    if (w && el && ud.unit.team !== src.team && Math.random() < (w.elem ? w.elemChance : 0) + ch) { ud.unit.dot = { elem: el, dps: (w.elemDps || Math.round(w.dmg * 0.5)) * (1 + 0.2 * this.sk('conductor')), t: 4 + this.sk('catalyst'), acc: 0, src }; } const P = this.player, bonus = src === P ? (head ? 1 + 0.12 * lv(this.save, 'deadeye') * (this.cls === 'ghostwire') : 1) * (P.cloakShot ? 3 + 0.5 * this.sk('ambush') : 1) * (1 + 0.04 * this.sk('stopping')) * (w && (w.type === 'rifle' || w.type === 'sniper') ? 1 + 0.05 * this.sk('longshot') : 1) * (head && ud.unit.sh <= 0 && this.sk('execution') ? 1.5 : 1) * (ud.unit.dot ? 1 + 0.05 * this.sk('amp') : 1) * this.lootMul(w, ud.unit, head) : 1; if (src === P) P.cloakShot = false; this.hurt(ud.unit, dmg * (head ? 2 : 1) * bonus, src, head); }
     else if (ud.kind === 'rune') { if (src?.isPlayer && this.zRune) this.zRune(h.object); }
     else if (ud.kind === 'vehicle') this.hurtVehicle(ud.vehicle, dmg * (w?.elem === 'corrosive' ? 1.5 : 1), src);
     else if (ud.kind === 'build') { const b = ud.build; b.hp -= dmg * (pick ? 2 : 1); b.mesh.material.opacity = 1; if (b.hp <= 0) this.removeBuild(b); }
@@ -244,7 +256,7 @@ export class Game {
     // Halo-style: the shield soaks everything; the headshot bonus only applies once the shield is already down.
     u.shT = 0;
     if (u.sh > 0) { const a = Math.min(u.sh, dmg); u.sh -= a; dmg -= a; if (u.sh <= 0) this.shieldPop(u); } else if (head) dmg *= 2;
-    u.hp -= dmg; dmg += 0; if (src.isPlayer) { this.stats.dmg += dmg; this.hooks.hitmark(head); }
+    u.hp -= dmg; if (src?.isPlayer && u !== src) { const w = this.slots?.[this.slot]; if (w?.affixes?.includes('vampiric')) src.hp = Math.min(src.maxHp, src.hp + dmg * 0.04); } if (src.isPlayer) { this.stats.dmg += dmg; this.hooks.hitmark(head); }
     if (u.isPlayer) this.hooks.hurt();
     if (!u.isPlayer && src && !u.target) u.target = src;
     if (u.hp <= 0 && this.mode === 'zombies' && u.team === 0) { this.zDown(u); return; }
@@ -252,6 +264,9 @@ export class Game {
       if (!u.isPlayer) { if (u.team !== this.player.team && Math.random() < (this.mode === 'zombies' ? 0.04 : 0.3)) this.dropLoot(genGun(this.save.rank + 1), u.pos); else if (this.mode !== 'zombies') this.dropWeapon(u.gun.id || 'kr4', u.pos, 0.6); }
       u.alive = false; u.deaths++; u.respawn = 3; src.kills++; this.score[src.team]++;
       if (u.mesh) u.mesh.visible = false; if (u.zombie) this.zKill(u, src, head);
+      if (src.isPlayer && this.slots) { const P = this.player, w = this.slots[this.slot]; if (w?.loot) { const A = w.affixes || [];
+        if (A.includes('bloodrush')) P.rushT = 3; if (w.legend === 'Gravesinger') P.hp = Math.min(P.maxHp, P.hp + 25); if (w.legend === 'Widow Maker' && head) this.explode(u.pos.clone().setY(1), 60, 3.5, P);
+        if (w.legend === 'Thunderclap') this.units.filter(e => e.alive && e.team !== P.team && e !== u && e.pos.distanceTo(u.pos) < 10).slice(0, 2).forEach(e => this.hurt(e, 25, P, false, 'shock')); } }
       if (src.isPlayer && this.sk) { const P = this.player, sk = this.sk, w = this.slots[this.slot];
         if (sk('siphon')) P.sh = Math.min(P.maxSh, P.sh + 40); if (sk('juggernaut')) this.skill.cdT = Math.max(0, this.skill.cdT - 5); if (sk('phantom') && P.cloakT > 0) this.skill.cdT = 0;
         if (sk('scavenger') && w && !w.pick) w.ammo = Math.min(w.mag, w.ammo + Math.ceil(w.mag * 0.1 * sk('scavenger'))); if (sk('nova') && u.dot) this.explode(u.pos.clone().setY(1), 40, 3, P); }
@@ -443,8 +458,8 @@ export class Game {
     if (P.alive && P.vehicle) { this.buildMode = null; this.pilot(P.vehicle, dt); }
     else if (P.alive) {
       P.spawnProt = Math.max(0, (P.spawnProt || 0) - dt);
-      P.moving = Math.hypot(input.move.x, input.move.y) > 0.1;
-    const sp = 5.5 * (P.speedMul || 1) * (P.cloakT > 0 && this.sk ? 1 + 0.1 * this.sk('ghostrun') : 1) * (P.zSpeed || 1) * (P.downed ? 0.25 : 1) * (1 + this.save.stats.speed * 0.03) * (input.sprint && input.move.y > 0 && !input.ads ? 1.45 : 1) * (input.ads ? 0.6 : 1);
+      P.moving = Math.hypot(input.move.x, input.move.y) > 0.1; P.rushT = Math.max(0, (P.rushT || 0) - dt);
+    const sp = 5.5 * (P.speedMul || 1) * (P.rushT > 0 ? 1.2 : 1) * (P.cloakT > 0 && this.sk ? 1 + 0.1 * this.sk('ghostrun') : 1) * (P.zSpeed || 1) * (P.downed ? 0.25 : 1) * (1 + this.save.stats.speed * 0.03) * (input.sprint && input.move.y > 0 && !input.ads ? 1.45 : 1) * (input.ads ? 0.6 : 1);
       const fx = -Math.sin(P.yaw), fz = -Math.cos(P.yaw), rx = Math.cos(P.yaw), rz = -Math.sin(P.yaw);
       let mx = fx * input.move.y + rx * input.move.x, mz = fz * input.move.y + rz * input.move.x; const l = Math.hypot(mx, mz); if (l > 1) { mx /= l; mz /= l; }
       this.moveUnit(P, mx * sp * dt, mz * sp * dt, dt, input.jump);
@@ -697,7 +712,7 @@ export class Game {
     }
   }
   shieldPop(u) {
-    this.sfx('shieldBreak', u.isPlayer ? null : u.pos); if (u.isPlayer) { this.hooks.shieldPop(); return; }
+    this.sfx('shieldBreak', u.isPlayer ? null : u.pos); if (u.isPlayer) { const w = this.slots?.[this.slot]; if (w?.legend === 'Last Laugh') { w.ammo = w.mag; w.reloading = 0; this.hooks.toast('Not yet.'); } this.hooks.shieldPop(); return; }
     const fx = new THREE.Mesh(new THREE.SphereGeometry(1.1, 10, 8), new THREE.MeshBasicMaterial({ color: 0x7fd8ff, transparent: true, opacity: 0.55, depthWrite: false }));
     fx.position.copy(u.pos); fx.position.y += 1.1; this.scene.add(fx); let t = 0; const step = () => { t += 0.05; fx.scale.setScalar(1 + t * 2); fx.material.opacity = 0.55 * (1 - t / 0.3); if (t < 0.3 && this.scene) requestAnimationFrame(step); else this.scene?.remove(fx); }; step();
   }
@@ -738,7 +753,7 @@ export class Game {
         this.lastLoot = { uid: gun.uid, t: 8 }; this.hooks.toast(`<span style="color:${RARITY[gun.rarity].css}">${RARITY[gun.rarity].name} ${gun.name}</span>${gun.elem ? ' · ' + ELEMENTS[gun.elem].name : ''} added to backpack (F / ENTER to equip now)`, true); } }
     this.nearChest = null; if (P.alive && !P.vehicle) for (const c of this.chests) if (!c.open && Math.hypot(c.x - P.pos.x, c.z - P.pos.z) < 2.6) { this.nearChest = c; break; }
   }
-  equipLoot(uid) { const gun = this.save.inv.find(x => x.uid === uid); if (!gun) return; const i = gun.type === 'pistol' ? 1 : 0; this.slots[i] = this.makeWeapon('L' + uid); this.save.loadout[i ? 'secondary' : 'primary'] = 'L' + uid; this.hooks.persist(); this.lastLoot = null; this.selectSlot(i); this.hooks.toast(`Equipped ${gun.name}`); }
+  equipLoot(uid) { const gun = this.save.inv.find(x => x.uid === uid); if (!gun) return; if (this.save.rank < reqRank(gun) && !this.save.prestige) { this.hooks.toast(`Requires rank ${reqRank(gun)}`); return; } const i = gun.type === 'pistol' ? 1 : 0; this.slots[i] = this.makeWeapon('L' + uid); this.save.loadout[i ? 'secondary' : 'primary'] = 'L' + uid; this.hooks.persist(); this.lastLoot = null; this.selectSlot(i); this.hooks.toast(`Equipped ${gun.name}`); }
   addChest(p) { const g = new THREE.Group(); const base = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.7, 0.8), this.m(0x5b3d1e, 'wood')); base.position.y = 0.35;
     const lid = new THREE.Mesh(new THREE.BoxGeometry(1.45, 0.2, 0.85), this.m(0xd4a63a, 'metal')); lid.position.y = 0.8; g.add(base, lid); g.position.copy(p); this.scene.add(g);
     this.chests.push({ x: p.x, z: p.z, mesh: g, lid, open: false }); this.solids.push({ min: new THREE.Vector3(p.x - 0.7, 0, p.z - 0.4), max: new THREE.Vector3(p.x + 0.7, 0.9, p.z + 0.4) }); }
