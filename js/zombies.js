@@ -12,6 +12,7 @@ export const PERKS = {
   swiftstep: { name: 'Swiftstep Spritz', cost: 2000, color: 0x2e86de, desc: '+15% move speed' },
   secondchance: { name: 'Second Chance Soda', cost: 1500, color: 0x8e44ad, desc: 'Revive yourself once; revive allies 2x faster' },
 };
+const FORGE_COST = [5000, 5000, 10000];
 const POWER = { maxammo: { name: 'MAX AMMO', color: 0xffffff }, insta: { name: 'INSTA-KILL', color: 0xff3b30 }, double: { name: 'DOUBLE POINTS', color: 0xffd84a }, nuke: { name: 'NUKE', color: 0x9be22d } };
 
 export function installZombies(G) {
@@ -19,7 +20,7 @@ export function installZombies(G) {
   P.zSetup = function () {
     const Z = this.layout.z; this.timeLeft = 1e9;
     this.z = { round: 0, toSpawn: 0, alive: 0, betweenT: 4, spawnT: 0, pts: 500, insta: 0, dbl: 0, perks: new Set(), open: new Set(['start']), powers: [], powerN: 0, kills: 0, downs: 0, boxT: 0,
-      cap: this.tier === 'low' ? (isPhone ? 10 : 16) : 24 };
+      cap: this.tier === 'low' ? (isPhone ? 10 : 24) : 48, egg: 0, runes: 0 };
     this.zDoors = Z.doors.map(d => { const h = d.debris ? 1.8 : 3.6; const mesh = new THREE.Mesh(new THREE.BoxGeometry(d.w, h, d.d), this.m(d.debris ? 0x6b5a45 : 0x5a3b22, d.debris ? 'concrete' : 'wood'));
       mesh.position.set(d.x, h / 2, d.z); this.scene.add(mesh); mesh.userData.kind = 'static'; this.hitMeshes.push(mesh);
       const solid = { min: new THREE.Vector3(d.x - d.w / 2, 0, d.z - d.d / 2), max: new THREE.Vector3(d.x + d.w / 2, 4, d.z + d.d / 2) }; this.solids.push(solid); return Object.assign({ mesh, solid, open: false }, d); });
@@ -30,13 +31,17 @@ export function installZombies(G) {
       else if (st.kind === 'forge') { mk(1.4, 1.1, 1.0, 0x2b2b2e, 0.55); mk(1.0, 0.3, 0.6, 0xff7a1a, 1.25, true); }
       g.position.set(st.x, 0, st.z); this.scene.add(g); if (st.kind !== 'wall') this.solids.push({ min: new THREE.Vector3(st.x - 0.8, 0, st.z - 0.6), max: new THREE.Vector3(st.x + 0.8, 2.2, st.z + 0.6) }); return Object.assign({ mesh: g }, st); });
     this.zombiePool = [];
+    // Easter egg: shoot 3 hidden runestones -> ring the abbey bell -> kill the Bellwarden -> escape through the crypt gate
+    this.zRunes = [[-38, 2.6, 30], [-38, 2.2, -25], [38, 2.2, -25]].map(([x, y, zz]) => { const m = new THREE.Mesh(new THREE.OctahedronGeometry(0.28, 0), new THREE.MeshBasicMaterial({ color: 0x7affd4 }));
+      m.position.set(x, y, zz); m.userData = { kind: 'rune' }; this.scene.add(m); this.hitMeshes.push(m); return m; });
+    this.zStations.push(Object.assign({ mesh: null, kind: 'bell', x: 0, z: -22, hidden: true }));
     for (const w of this.slots) if (!w.pick) w.reserve = w.mag * 4;
     // light the scene for night
     this.scene.fog.near = 18; this.scene.fog.far = 70;
   };
   P.zZoneOf = function (x, z) { return z > 15 ? 'start' : x < -10 ? 'west' : x > 10 ? 'east' : 'center'; };
   P.zNextRound = function () {
-    const z = this.z; z.round++; z.toSpawn = Math.min(6 + z.round * 3 + (this.units.filter(u => u.team === 0).length - 1) * 2, 120); z.spawnT = 2; z.powerN = 0;
+    const z = this.z; z.round++; if (z.round % 5 === 0) z.bossDue = (z.bossDue || 0) + 1; z.toSpawn = Math.min(6 + z.round * 3 + (this.units.filter(u => u.team === 0).length - 1) * 2, 120); z.spawnT = 2; z.powerN = 0;
     for (const u of this.units) if (u.team === 0 && !u.isPlayer && (!u.alive || u.downed)) { u.downed = false; if (u.mesh) u.mesh.rotation.z = 0; this.spawn(u, { id: 'p', x: this.player.pos.x, z: this.player.pos.z }); }
     this.hooks.toast(`ROUND ${z.round}`); this.sfx('lost'); this.score = [z.round, z.toSpawn];
   };
@@ -50,6 +55,14 @@ export function installZombies(G) {
       this.zombiePool.push(u); }
     const R = z.round; u.maxHp = Math.round(R < 10 ? 60 + R * 40 : (60 + 9 * 40) * Math.pow(1.1, R - 9)); u.maxSh = 0;
     u.speed = R < 3 ? 2.2 : R < 6 ? 3.2 + Math.random() * 1.2 : 4.4 + Math.random() * 1.4; u.dmg = 35 + R * 2;
+    // special zombies: runners (R4+), bloaters that burst (R6+), an armored boss every 5th round (or summoned by the bell)
+    const boss = z.bossDue > 0, t = boss ? 'boss' : R >= 6 && Math.random() < 0.1 ? 'bloater' : R >= 4 && Math.random() < 0.15 ? 'runner' : 'shambler'; if (boss) z.bossDue--;
+    u.ztype = t; u.name = { shambler: 'Shambler', runner: 'Runner', bloater: 'Bloater', boss: 'Bellwarden' }[t];
+    const [body] = u.mesh.children; body.material = this.m({ shambler: 0x4c5a3a, runner: 0x8a8f7a, bloater: 0x6b7a2a, boss: 0x3a3f4a }[t]);
+    u.mesh.scale.setScalar(t === 'boss' ? 1.6 : t === 'bloater' ? 1.25 : 1);
+    if (t === 'runner') { u.maxHp = Math.round(u.maxHp * 0.6); u.speed = 6.2 + Math.random(); }
+    if (t === 'bloater') { u.maxHp = Math.round(u.maxHp * 1.8); u.speed = 2.4; }
+    if (t === 'boss') { u.maxHp = Math.round(u.maxHp * 12 + 1500); u.speed = 3.6; u.dmg = 70; u.armored = true; this.hooks.toast(z.summoned ? 'THE BELLWARDEN ANSWERS' : 'BOSS: Bellwarden'); }
     this.spawn(u, { id: 'z', x: s[0], z: s[1] }); u.sh = 0; u.spawnProt = 0; u.target = null; u.atkCd = 0; u.dot = null; u.pos.x = s[0] + (Math.random() - 0.5) * 2; u.pos.z = s[1] + (Math.random() - 0.5) * 2;
     z.toSpawn--; z.alive++;
   };
@@ -65,14 +78,23 @@ export function installZombies(G) {
   };
   // hit/kill points and drops
   P.zHit = function (u, src) { if (src?.isPlayer) this.zPts(10); };
+  // Guns keep pace with exponential zombie HP: x1.08 per round after 10. Armored bosses take half damage to the body.
+  P.zDmgMul = function (u, src, head) { const R = this.z.round; return (src?.team === 0 ? Math.pow(1.08, Math.max(0, R - 10)) : 1) * (u.armored && !head ? 0.5 : 1); };
+  P.zRune = function (m) { const z = this.z; if (!m.visible) return; m.visible = false; this.hitMeshes = this.hitMeshes.filter(x => x !== m); z.runes++; this.sfx('capture');
+    this.hooks.toast(z.runes < 3 ? `A runestone shatters (${z.runes}/3)` : 'The abbey bell stirs…'); if (z.runes >= 3) { z.egg = 1; const b = this.zStations.find(s => s.kind === 'bell'); b.hidden = false;
+      const g = new THREE.Group(); const c = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.8, 1.1, 8), this.m(0xb08a3a, 'metal')); c.position.y = 2.2; g.add(c); const p = new THREE.Mesh(new THREE.BoxGeometry(0.2, 2.8, 0.2), this.m(0x3a2a18, 'wood')); p.position.y = 1.4; g.add(p); g.position.set(b.x, 0, b.z); this.scene.add(g); b.mesh = g; } };
   P.zKill = function (u, src, head) {
     const z = this.z; z.alive--; z.kills++; this.score = [z.round, z.toSpawn + z.alive];
     if (src?.isPlayer) this.zPts(head ? 100 : 60);
-    if (z.powerN < 4 && Math.random() < 0.035) { z.powerN++; this.zDropPower(u.pos); }
+    if (u.ztype === 'bloater') { this.explode(u.pos.clone().setY(1), 40, 3.2, u); }
+    if (u.ztype === 'boss') { this.zDropPower(u.pos, 'maxammo'); if (src?.isPlayer) this.zPts(1000); if (z.egg === 2) { z.egg = 3; this.zOpenExit(); } }
+    else if (z.powerN < 4 && Math.random() < 0.035) { z.powerN++; this.zDropPower(u.pos); }
   };
   P.zPts = function (n) { this.z.pts += n * (this.z.dbl > 0 ? 2 : 1); };
-  P.zDropPower = function (pos) {
-    const k = Object.keys(POWER)[Math.floor(Math.random() * 4)]; const m = new THREE.Mesh(new THREE.OctahedronGeometry(0.45, 0), new THREE.MeshBasicMaterial({ color: POWER[k].color }));
+  P.zOpenExit = function () { const g = new THREE.Mesh(new THREE.BoxGeometry(3, 3.4, 0.4), new THREE.MeshBasicMaterial({ color: 0x7affd4, transparent: true, opacity: 0.6 }));
+    g.position.set(0, 1.7, -38); this.scene.add(g); this.zExit = g; this.hooks.toast('The crypt gate is open — ESCAPE (center, north wall)'); };
+  P.zDropPower = function (pos, force) {
+    const k = force || Object.keys(POWER)[Math.floor(Math.random() * 4)]; const m = new THREE.Mesh(new THREE.OctahedronGeometry(0.45, 0), new THREE.MeshBasicMaterial({ color: POWER[k].color }));
     m.position.set(pos.x, 1.2, pos.z); this.scene.add(m); this.z.powers.push({ k, mesh: m, life: 25 });
   };
   P.zPower = function (k) {
@@ -94,7 +116,7 @@ export function installZombies(G) {
   P.zGive = function (w) { // put a weapon into the current gun slot
     const i = this.slot === 2 ? 0 : this.slot; w.reserve = w.mag * 4; this.slots[i] = w; w.baseReload = 0; w.baseRpm = 0; this.applyPerks(); this.selectSlot(i); };
   P.zNear = function () { const Pl = this.player; let best = null, bd = 1e9;
-    for (const s of this.zStations) { const d = Math.hypot(s.x - Pl.pos.x, s.z - Pl.pos.z); if (d < 2.6 && d < bd) { bd = d; best = s; } }
+    for (const s of this.zStations) { if (s.hidden) continue; const d = Math.hypot(s.x - Pl.pos.x, s.z - Pl.pos.z); if (d < 2.6 && d < bd) { bd = d; best = s; } }
     for (const d of this.zDoors) if (!d.open) { const dd = Math.hypot(d.x - Pl.pos.x, d.z - Pl.pos.z); if (dd < 3.2 && dd < bd) { bd = dd; best = d; } }
     for (const u of this.units) if (u.downed && !u.isPlayer && u.alive) { const dd = u.pos.distanceTo(Pl.pos); if (dd < 2 && dd < bd) { bd = dd; best = { kind: 'revive', u }; } }
     return best; };
@@ -112,8 +134,14 @@ export function installZombies(G) {
         let w; if (Math.random() < 0.5) { const ids = Object.keys(GUNS); w = this.makeWeapon(ids[Math.floor(Math.random() * ids.length)]); }
         else { const g = genGun(this.save.rank + 4 + z.round, Math.random() < 0.15 ? 4 : Math.random() < 0.5 ? 3 : 2); Object.assign(g, { uid: 0 }); w = Object.assign({ id: 'box' + Math.random() }, g); w.adsZoom = g.zoom || 1.15; w.ammo = w.mag; w.reloading = 0; }
         this.zGive(w); this.hooks.toast(`Mystery Crate: ${w.name}`); }, 1400); } return true; }
-    if (s.kind === 'forge') { const i = this.slot === 2 ? 0 : this.slot, w = this.slots[i]; if (w.forged) { this.hooks.toast('Already forged'); return true; }
-      if (pay(s.cost)) { const el = Object.keys(ELEMENTS)[Math.floor(Math.random() * 4)]; Object.assign(w, { forged: true, name: 'Forged ' + w.name, dmg: w.dmg * 2.2, mag: Math.round(w.mag * 1.5), elem: w.elem || el, elemChance: Math.max(w.elemChance || 0, 0.3), elemDps: Math.max(w.elemDps || 0, Math.round(w.dmg * 1.5)) });
+    if (s.kind === 'bell') { if (s.hidden || z.egg !== 1) return false; z.egg = 2; z.summoned = true; z.bossDue = (z.bossDue || 0) + 1; z.toSpawn++; this.sfx('lost'); this.hooks.toast('The bell tolls… something comes'); return true; }
+    if (s.kind === 'forge') { const i = this.slot === 2 ? 0 : this.slot, w = this.slots[i], tier = w.forged || 0; if (tier >= 3) { this.hooks.toast('Fully forged (III)'); return true; }
+      // Forge tiers: I 5000 (x2.2 dmg, element), II 5000 (x1.6, +50% element DoT), III 10000 (x1.6, +25% mag, +fire rate)
+      const cost = FORGE_COST[tier]; if (pay(cost)) { const el = Object.keys(ELEMENTS)[Math.floor(Math.random() * 4)], base = w.baseName || w.name; w.baseName = base;
+        if (tier === 0) Object.assign(w, { dmg: w.dmg * 2.2, mag: Math.round(w.mag * 1.5), elem: w.elem || el, elemChance: Math.max(w.elemChance || 0, 0.3), elemDps: Math.max(w.elemDps || 0, Math.round(w.dmg * 1.5)) });
+        if (tier === 1) Object.assign(w, { dmg: w.dmg * 1.6, elemChance: w.elemChance + 0.1, elemDps: Math.round(w.elemDps * 1.5) });
+        if (tier === 2) { Object.assign(w, { dmg: w.dmg * 1.6, mag: Math.round(w.mag * 1.25) }); w.baseRpm = (w.baseRpm || w.rpm) * 1.15; this.applyPerks(); }
+        w.forged = tier + 1; w.name = `Forged${['', ' II', ' III'][tier]} ${base}`;
         w.ammo = w.mag; w.reserve = w.mag * 6; this.selectSlot(i); this.hooks.toast(`${w.name} (${ELEMENTS[w.elem].name})`); } return true; }
     return false;
   };
@@ -132,13 +160,15 @@ export function installZombies(G) {
       if (r && r.pos.distanceTo(d.pos) < 1.8) { d.revT += dt * (r === Pl && z.perks.has('secondchance') ? 2 : 1); if (d.revT >= 3) { this.zRevive(d); if (r.reviveFor === d) r.reviveFor = null; d.reviver = null; } } else d.revT = 0;
       if (d.bleed <= 0) { d.downed = false; d.alive = false; d.respawn = 1e9; if (d.mesh) d.mesh.visible = false; if (r && r.reviveFor === d) r.reviveFor = null; if (d.isPlayer) return this.end(); } }
     if (Pl.downed && !allies.some(u => !u.downed)) return this.end();
+    if (this.zExit && !Pl.downed && Math.hypot(Pl.pos.x, Pl.pos.z + 38) < 2.5) { z.escaped = true; return this.end(); }
+    for (const m of this.zRunes) if (m.visible) m.rotation.y += dt;
     // prompt
     const s = Pl.downed ? null : this.zNear(), tap = matchMedia('(pointer: coarse)').matches ? 'ENTER' : 'F';
     this.zPrompt = Pl.downed ? `DOWN · bleeding out ${Math.ceil(Pl.bleed)}s${this.zSelfRevive ? ' · Second Chance kicking in…' : ' · hold on for a revive'}` : !s ? '' :
       s.kind === 'revive' ? `${tap}: revive ${s.u.name}${s.u.revT > 0 ? ' ' + Math.round(s.u.revT / 3 * 100) + '%' : ''}` : s.zone ? `${tap}: open ${s.name} [${s.cost}]` :
       s.kind === 'wall' ? (this.slots.find(w => w.id === s.gun) ? `${tap}: ammo for ${GUNS[s.gun].name} [${Math.round(s.cost / 2)}]` : `${tap}: buy ${GUNS[s.gun].name} [${s.cost}]`) :
-      s.kind === 'perk' ? `${tap}: ${PERKS[s.perk].name} — ${PERKS[s.perk].desc} [${PERKS[s.perk].cost}]` : s.kind === 'box' ? `${tap}: Mystery Crate [${s.cost}]` : `${tap}: Forge Anvil — upgrade your gun [${s.cost}]`;
+      s.kind === 'perk' ? `${tap}: ${PERKS[s.perk].name} — ${PERKS[s.perk].desc} [${PERKS[s.perk].cost}]` : s.kind === 'box' ? `${tap}: Mystery Crate [${s.cost}]` : s.kind === 'bell' ? `${tap}: ring the abbey bell` : (() => { const t = this.slots[this.slot === 2 ? 0 : this.slot].forged || 0; return t >= 3 ? 'Forge Anvil: fully forged' : `${tap}: Forge Anvil — tier ${['I', 'II', 'III'][t]} [${FORGE_COST[t]}]`; })();
   };
   P.zEnd = function () { const z = this.z, s = this.stats; const xp = Math.round(z.round * 180 + z.kills * 40), gp = Math.round(z.round * 70 + z.kills * 6);
-    return { won: false, zombies: true, round: z.round, xp, gp, stats: s, score: [z.round, z.kills] }; };
+    return { won: !!z.escaped, escaped: !!z.escaped, zombies: true, round: z.round, xp: xp + (z.escaped ? 5000 : 0), gp: gp + (z.escaped ? 2500 : 0), stats: s, score: [z.round, z.kills] }; };
 }

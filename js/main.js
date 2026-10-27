@@ -121,12 +121,12 @@ function drawMap(g, c, full) {
 }
 function applyResult(r) {
   $('spawnsel').classList.add('hidden'); $('spawnsel').dataset.k = '';
-  if (r.zombies) { S.zbest = Math.max(S.zbest || 0, r.round); S.ztotal = (S.ztotal || 0) + r.round; }
+  if (r.escaped) S.zescapes = (S.zescapes || 0) + 1; if (r.zombies) { S.zbest = Math.max(S.zbest || 0, r.round); S.ztotal = (S.ztotal || 0) + r.round; }
   r.gp = Math.round(r.gp * gpMult(S)); const extra = careerResult(S, r);
   S.xp += r.xp; S.gp += r.gp; S.totals.kills += r.stats.kills; S.totals.deaths += r.stats.deaths; S.totals.matches++; if (r.won) S.totals.wins++;
   const before = S.rank; while (S.rank < RANKS.length - 1 && S.xp >= xpForRank(S.rank)) { S.rank++; S.points += 1; S.gp += 250; }
   save(S);
-  $('rtitle').textContent = r.zombies ? `SURVIVED ${Math.max(0, r.round - 1)} ROUND${r.round === 2 ? '' : 'S'}` : r.won ? 'VICTORY' : 'DEFEAT';
+  $('rtitle').textContent = r.escaped ? `ESCAPED GRAVEWATCH (round ${r.round})` : r.zombies ? `SURVIVED ${Math.max(0, r.round - 1)} ROUND${r.round === 2 ? '' : 'S'}` : r.won ? 'VICTORY' : 'DEFEAT';
   $('rbody').innerHTML = `<p>${r.zombies ? `Reached round ${r.round} · Best ${S.zbest}` : `Score ${r.score[0]} – ${r.score[1]}`}</p><p>Kills ${r.stats.kills} · Deaths ${r.stats.deaths} · Headshots ${r.stats.head} · Builds ${r.stats.builds}</p>
     <p><b>+${r.xp} XP</b> · <b>+${r.gp} GP</b></p>${extra.map(t => `<p class="note">${t}</p>`).join('')}${S.rank > before ? `<h3>RANK UP! You are now ${RANKS[S.rank]}</h3><p>+${S.rank - before} stat point(s), +${(S.rank - before) * 250} GP bonus</p>` : ''}`;
   show('results');

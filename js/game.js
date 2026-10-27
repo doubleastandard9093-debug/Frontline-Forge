@@ -222,6 +222,7 @@ export class Game {
     const w = src?.isPlayer ? this.slots[this.slot] : null;
     if (ud.kind === 'unit') { const ch = this.cls === 'sparkwright' ? 0.06 * lv(this.save, 'charged') : 0, el = w?.elem || (ch && !w?.pick ? 'shock' : null);
     if (w && el && ud.unit.team !== src.team && Math.random() < (w.elem ? w.elemChance : 0) + ch) { ud.unit.dot = { elem: el, dps: w.elemDps || Math.round(w.dmg * 0.5), t: 4, acc: 0, src }; } const P = this.player, bonus = src === P ? (head ? 1 + 0.12 * lv(this.save, 'deadeye') * (this.cls === 'ghostwire') : 1) * (P.cloakShot ? 3 : 1) : 1; if (src === P) P.cloakShot = false; this.hurt(ud.unit, dmg * (head ? 2 : 1) * bonus, src, head); }
+    else if (ud.kind === 'rune') { if (src?.isPlayer && this.zRune) this.zRune(h.object); }
     else if (ud.kind === 'vehicle') this.hurtVehicle(ud.vehicle, dmg * (w?.elem === 'corrosive' ? 1.5 : 1), src);
     else if (ud.kind === 'build') { const b = ud.build; b.hp -= dmg * (pick ? 2 : 1); b.mesh.material.opacity = 1; if (b.hp <= 0) this.removeBuild(b); }
     else if (ud.kind === 'harvest' && src.isPlayer && pick) {
@@ -234,7 +235,7 @@ export class Game {
   hurt(u, dmg, src, head, elem) {
     if (!u.alive || u.spawnProt > 0 || (src && src.team === u.team && src !== u)) return;
     if (u.vehicle) { this.hurtVehicle(u.vehicle, dmg, src); return; }
-    if (u.downed) return; if (u.zombie) { if (this.z?.insta > 0) dmg = 1e6; this.zHit(u, src); }
+    if (u.downed) return; if (u.zombie) { dmg *= this.zDmgMul(u, src, head); if (this.z?.insta > 0 && u.ztype !== 'boss') dmg = 1e6; this.zHit(u, src); }
     if (elem === 'shock' && u.sh > 0) dmg *= 2; else if (elem === 'fire' && u.sh <= 0) dmg *= 1.5;
     if (u.dmgTaken) dmg *= u.dmgTaken();
     if (src?.isPlayer && u !== src) this.hooks.dmgNum(u.pos, dmg * (head && u.sh <= 0 ? 2 : 1), elem, head);
