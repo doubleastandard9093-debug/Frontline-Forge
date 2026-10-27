@@ -1,4 +1,4 @@
-import { GUNS, ATTACH, RANKS, STATS, xpForRank } from './data.js';
+import { GUNS, ATTACH, RANKS, STATS, xpForRank, BOT_TIERS } from './data.js';
 import { MAPS } from './maps.js';
 import { load, save, exportCode, importCode, fresh } from './save.js';
 import { pickTier } from './gfx.js';
@@ -143,6 +143,8 @@ function rankHtml() {
 function render(id) {
   if (id === 'menu') $('profile').innerHTML = rankHtml();
   if (id === 'play') {
+    $('bottier').innerHTML = Object.entries(BOT_TIERS).map(([k, t]) => `<button data-bt="${k}" class="${(S.botTier || 'regular') === k ? 'on' : ''}">${t.name}<small>${Math.round(t.react * 1000)}ms react · aim ×${t.aim}</small></button>`).join('');
+    document.querySelectorAll('#bottier button').forEach(b => b.onclick = () => { S.botTier = b.dataset.bt; save(S); render('play'); });
     document.querySelectorAll('#modes button').forEach(b => { b.classList.toggle('on', b.dataset.mode === mode); b.onclick = () => { mode = b.dataset.mode; render('play'); }; });
     $('maps').innerHTML = Object.entries(MAPS).filter(([k, m]) => (m.type === 'zombies') === (mode === 'zombies')).map(([k, m]) => `<button class="card" data-map="${k}"><span class="tag">${{ small: 'SMALL · QUICK', large: 'ARENA · BIG BATTLE', war: 'FULL-SCALE · LAND, SEA & AIR', zombies: 'ZOMBIES · ROUND SURVIVAL' }[m.type]}</span><b>${m.name}</b><small>${m.type === 'zombies' ? `${m.desc} You + ${m.teamSize - 1} bot squadmates. Best: round ${S.zbest || 0}` : `${m.desc} ${m.teamSize}v${mode === 'coop' ? Math.round(m.teamSize * 1.5) : m.teamSize}, first to ${m.scoreLimit}, ${m.time / 60} min`}</small></button>`).join('');
     document.querySelectorAll('[data-map]').forEach(b => b.onclick = () => startMatch(b.dataset.map));

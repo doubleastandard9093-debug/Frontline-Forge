@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { GUNS, ATTACH, BUILD, GRID } from './data.js';
+import { GUNS, ATTACH, BUILD, GRID, BOT_TIERS } from './data.js';
 import { MAPS } from './maps.js';
 import { mat, makeRenderer, isPhone } from './gfx.js';
 import { Nav } from './nav.js';
@@ -29,6 +29,7 @@ export class Game {
 
   // ---------- match setup ----------
   start(mapId, mode = 'tdm') {
+    this.bt = BOT_TIERS[this.save.botTier] || BOT_TIERS.regular;
     this.choosing = false; this.sfx = () => {}; this.engine = () => {};
     const M = this.map = MAPS[mapId]; this.mode = mode; const L = M.gen(); this.layout = L;
     const s = this.scene = new THREE.Scene(); s.background = new THREE.Color(M.sky);
@@ -388,7 +389,7 @@ export class Game {
       u.think = 0.3 + Math.random() * 0.3; let best = null, bd = 1e9;
       for (const e of this.units) if (e.alive && e.team !== u.team && !(e.cloakT > 0)) { const d = e.pos.distanceTo(u.pos); if (d < bd && d < 80 && this.canSee(u, e) === true) { bd = d; best = e; } }
       u.target = best; u.seeT = best ? (u.seeT || 0) : 0;
-      if (!best && !u.goVeh && Math.random() < 0.15) { for (const v of this.vehicles) if (v.alive && v.team === u.team && v.pos.distanceTo(u.pos) < 35 && v.seats.some(s => !s.unit) && !this.units.some(o => o.goVeh === v)) { u.goVeh = v; break; } }
+      if (!best && !u.goVeh && Math.random() < this.bt.veh) { for (const v of this.vehicles) if (v.alive && v.team === u.team && v.pos.distanceTo(u.pos) < 35 && v.seats.some(s => !s.unit) && !this.units.some(o => o.goVeh === v)) { u.goVeh = v; break; } }
       if (u.goVeh && !best) u.wp.copy(u.goVeh.pos);
       if (this.z && !best && (u.pos.distanceTo(this.player.pos) > 7 || Math.random() < 0.1)) { u.wp.set(this.player.pos.x + (Math.random() - 0.5) * 8, 0, this.player.pos.z + (Math.random() - 0.5) * 8); u.bumped = false; }
       if (!this.z && !best && (u.pos.distanceTo(u.wp) < 3 || Math.random() < 0.05 || u.bumped)) {
@@ -406,19 +407,19 @@ export class Game {
       mx = side.x * u.strafe * 0.6; mz = side.z * u.strafe * 0.6;
       if (dist > g.range * 0.7) { mx += -Math.sin(u.yaw); mz += -Math.cos(u.yaw); }
       if (dist < 2.2) this.melee(u);
-      u.nadeCd = (u.nadeCd || 6 + Math.random() * 6) - dt;
-      if (u.nadeCd <= 0 && dist > 8 && dist < 24 && u.seeT > 1) { u.nadeCd = 10 + Math.random() * 8; const type = Math.random() < 0.5 ? 'frag' : 'plasma'; const dir = t.pos.clone().sub(u.pos); const flat = Math.hypot(dir.x, dir.z); dir.y = flat * 0.18; dir.normalize();
+      u.nadeCd = (u.nadeCd || (6 + Math.random() * 6) / this.bt.nade) - dt;
+      if (u.nadeCd <= 0 && dist > 8 && dist < 24 && u.seeT > 1) { u.nadeCd = (10 + Math.random() * 8) / this.bt.nade; const type = Math.random() < 0.5 ? 'frag' : 'plasma'; const dir = t.pos.clone().sub(u.pos); const flat = Math.hypot(dir.x, dir.z); dir.y = flat * 0.18; dir.normalize();
         const n = this.throwNade(u, type, dir); if (n) { const last = this.nadesLive[this.nadesLive.length - 1]; last.vel.multiplyScalar(Math.min(1, flat / 20) * 0.95 + 0.05); } }
       g.cd -= dt;
       if (g.reloading > 0) { g.reloading -= dt; if (g.reloading <= 0) g.ammo = g.mag; }
       else if (g.ammo <= 0) g.reloading = g.reload * 1.2;
-      else if (g.cd <= 0 && u.seeT > 0.45) {
+      else if (g.cd <= 0 && u.seeT > (u.zombie ? 0.45 : this.bt.react)) {
         g.cd = 60 / g.rpm * (g.auto ? 1.6 : 1.2); g.ammo--; u.firedT = 1.5; this.sfx(Game.gunSound(g), u.pos);
         const vis = this.canSee(u, t); const from = u.pos.clone(); from.y += 1.3;
         if (vis === false) {}
         else if (vis !== true) { if (['build', 'vehicle'].includes(vis.object?.userData.kind)) this.damageAt(vis, g.dmg, u); this.tracer(from, vis.point); }
-        else { const chance = u.skill * (1 - Math.min(dist / (g.range * 1.6), 0.8)) * (t.isPlayer ? 0.55 : 0.6);
-          const hits = g.pellets ? Math.round(g.pellets * chance) : (Math.random() < chance ? 1 : 0);
+        else { let chance = u.skill * (1 - Math.min(dist / (g.range * 1.6), 0.8)) * (t.isPlayer ? 0.55 : 0.6);
+          chance = Math.min(0.95, chance * this.bt.aim); const hits = g.pellets ? Math.round(g.pellets * chance) : (Math.random() < chance ? 1 : 0);
           const to = t.pos.clone(); to.y += 1.3; to.x += (Math.random() - 0.5) * (hits ? 0.3 : 2); to.z += (Math.random() - 0.5) * (hits ? 0.3 : 2);
           this.tracer(from, to); if (hits) this.hurt(t, g.dmg * hits * (t.isPlayer ? 0.8 : 1), u, Math.random() < 0.1); }
       }

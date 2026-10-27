@@ -27,3 +27,12 @@ export const STATS = {
 };
 export const BUILD = { wall: { cost: 10, hp: 150 }, floor: { cost: 10, hp: 140 }, ramp: { cost: 10, hp: 140 } };
 export const GRID = 4;
+
+// Bot difficulty, chosen per match. react = seconds on target before first shot; aim scales hit chance;
+// nade/veh scale how often bots throw grenades and take vehicles.
+export const BOT_TIERS = {
+  recruit: { name: 'Recruit', react: 0.8, aim: 0.6, nade: 0.4, veh: 0.06 },
+  regular: { name: 'Regular', react: 0.45, aim: 1, nade: 1, veh: 0.15 },
+  veteran: { name: 'Veteran', react: 0.3, aim: 1.25, nade: 1.5, veh: 0.25 },
+  legend: { name: 'Legend', react: 0.18, aim: 1.5, nade: 2.2, veh: 0.35 },
+};
