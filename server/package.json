@@ -1,0 +1,2 @@
+{ "name": "frontline-forge-server", "version": "0.0.1", "private": true, "type": "module",
+  "description": "STUB authoritative server. Offline; not deployed.", "scripts": { "start": "node server.js" }, "dependencies": { "ws": "^8.18.0" } }

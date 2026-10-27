@@ -1,0 +1,9 @@
+# Template only — not deployed. `fly launch --no-deploy` then `fly deploy` when online play is turned on.
+app = "frontline-forge"
+primary_region = "lax"
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
