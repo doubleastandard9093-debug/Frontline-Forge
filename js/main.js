@@ -33,7 +33,7 @@ const hooks = {
     $('hpfill').style.width = Math.max(0, P.hp / P.maxHp * 100) + '%'; $('hptext').textContent = Math.max(0, Math.ceil(P.hp));
     $('wname').textContent = w.pick ? 'Breacher Pick' : w.name;
     $('ammo').textContent = w.pick ? '—' : w.reloading > 0 ? 'RELOAD' : w.reserve !== undefined ? `${w.ammo} | ${w.reserve}` : `${w.ammo} / ${w.mag}`;
-    $('mats').textContent = `Wood ${g.mats.wood} · Stone ${g.mats.stone} · ${g.nadeType === 'frag' ? '▶' : ''}Frag ${P.nades.frag} ${g.nadeType === 'plasma' ? '▶' : ''}Plasma ${P.nades.plasma}`;
+    $('mats').textContent = `Wood ${g.mats.wood} · Stone ${g.mats.stone} · ${g.nadeType === 'frag' ? '▶' : ''}Frag ${P.nades.frag} ${g.nadeType === 'plasma' ? '▶' : ''}Plasma ${P.nades.plasma} ${g.nadeType === 'emp' ? '▶' : ''}EMP ${P.nades.emp || 0}`;
     if (g.skill) { const k = g.skill; $('skill').textContent = `[${matchMedia('(pointer: coarse)').matches ? 'SKILL' : 'H'}] ${k.name}: ${k.t > 0 ? 'ACTIVE ' + Math.ceil(k.t) + 's' : k.cdT > 0 ? Math.ceil(k.cdT) + 's' : 'READY'}`; $('skill').classList.toggle('ready', !k.cdT); }
     document.body.classList.toggle('cloaked', g.player.cloakT > 0);
     $('bmode').textContent = g.buildMode ? `BUILD: ${g.buildMode.toUpperCase()} (10 wood)` : '';
@@ -41,7 +41,7 @@ const hooks = {
       if (v.K.mode === 'jet' || v.K.mode === 'heli') $('ammo').textContent += ` · ALT ${Math.round(v.pos.y)}m${v.K.mode === 'jet' ? ` · ${Math.round(v.speed * 3.6)} km/h` : ''}`;
       $('wname').classList.toggle('warn', v.hp < v.K.hp * 0.3); if (v.hp < v.K.hp * 0.3) $('wname').textContent += ' · ARMOR CRITICAL'; }
     $('caps').innerHTML = g.capPoints.map(c => `<span class="cap o${c.owner}">${c.n}</span>`).join('');
-    $('prompt').textContent = g.near ? `${matchMedia('(pointer: coarse)').matches ? 'Tap ENTER' : 'Press F'} to pilot ${g.near.K.name}` : g.nearPick ? `${matchMedia('(pointer: coarse)').matches ? 'Tap ENTER' : 'Press F'} to swap for ${GUNS[g.nearPick.id].name}` : g.nearChest ? `${matchMedia('(pointer: coarse)').matches ? 'Tap ENTER' : 'Press F'} to open chest` : (g.zPrompt || '');
+    $('prompt').textContent = g.hijack && !g.near ? `${matchMedia('(pointer: coarse)').matches ? 'Tap ENTER' : 'Press F'} to hijack ${g.hijack.K.name}` : g.near ? `${matchMedia('(pointer: coarse)').matches ? 'Tap ENTER' : 'Press F'} to pilot ${g.near.K.name}` : g.nearPick ? `${matchMedia('(pointer: coarse)').matches ? 'Tap ENTER' : 'Press F'} to swap for ${GUNS[g.nearPick.id].name}` : g.nearChest ? `${matchMedia('(pointer: coarse)').matches ? 'Tap ENTER' : 'Press F'} to open chest` : (g.zPrompt || '');
     $('dead').classList.toggle('hidden', P.alive);
     $('goal').textContent = g.z ? `${g.map.name} · Zombies · Round ${g.z.round} · ${g.z.alive + g.z.toSpawn} left` : `${g.map.name} · ${g.mode === 'coop' ? 'Co-op vs Bots' : g.map.mode}${g.capPoints.length ? ' (hold points)' : ''} · first to ${g.map.scoreLimit}`;
   },

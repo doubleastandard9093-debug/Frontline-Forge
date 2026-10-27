@@ -5,6 +5,7 @@ export const GUNS = {
   hx2:   { name: 'Hornet HX-2',   type: 'smg',    dmg: 13, rpm: 900, mag: 35, reload: 1.7, spread: 0.032, recoil: 0.008, range: 50,  price: 1500, rank: 2, auto: true },
   bm12:  { name: 'Breaker M12',   type: 'shotgun',dmg: 14, rpm: 80,  mag: 6,  reload: 2.6, spread: 0.07,  recoil: 0.06,  range: 25,  price: 2500, rank: 3, auto: false, pellets: 9 },
   lr50:  { name: 'Longreach LR-50',type:'sniper', dmg: 95, rpm: 45,  mag: 5,  reload: 3.0, spread: 0.002, recoil: 0.09,  range: 300, price: 5000, rank: 5, auto: false, zoom: 4 },
+  ll9:   { name: 'Skyhook LL-9', type: 'launcher', dmg: 90, rpm: 40, mag: 2, reload: 3.2, spread: 0.004, recoil: 0.08, range: 200, price: 4000, rank: 3, auto: false, lock: true, zoom: 1.6 },
   tg7:   { name: 'Tempest TG-7',  type: 'lmg',    dmg: 18, rpm: 720, mag: 80, reload: 4.2, spread: 0.035, recoil: 0.010, range: 110, price: 8000, rank: 7, auto: true },
 };
 export const ATTACH = {

@@ -138,7 +138,7 @@ export class Game {
       u.pos.set(THREE.MathUtils.clamp(sp[0] + (Math.random() - 0.5) * spread, -h, h), 0, THREE.MathUtils.clamp(sp[1] + (Math.random() - 0.5) * (isBase ? 8 : 10), -h, h));
       if (!this.blocked(u.pos)) break;
     }
-    u.vehicle = null; u.goVeh = null; u.hp = u.maxHp; u.nades = { frag: 2 + (u.isPlayer ? this.fragBonus || 0 : 0), plasma: 2 }; u.sh = u.maxSh; u.shT = 9; u.alive = true; u.vy = 0; u.yaw = u.team === 0 ? 0 : Math.PI; u.pitch = 0; u.spawnProt = 2;
+    u.vehicle = null; u.goVeh = null; u.hp = u.maxHp; u.nades = { frag: 2 + (u.isPlayer ? this.fragBonus || 0 : 0), plasma: 2, emp: u.isPlayer ? 1 : 0 }; u.sh = u.maxSh; u.shT = 9; u.alive = true; u.vy = 0; u.yaw = u.team === 0 ? 0 : Math.PI; u.pitch = 0; u.spawnProt = 2;
     if (u.mesh) u.mesh.visible = true;
   }
   blocked(p) { for (const s of this.solids) if (p.x > s.min.x - RAD && p.x < s.max.x + RAD && p.z > s.min.z - RAD && p.z < s.max.z + RAD && s.max.y > p.y + 0.5 && s.min.y < p.y + 1.7) return true; return false; }
@@ -179,7 +179,7 @@ export class Game {
     this.slot = i; this.buildMode = null; const w = this.slots[i]; this.view.clear();
     const dark = this.m(CAMOS[this.save.cos?.camo]?.color ?? 0x23252a, 'metal'), add = (geo, x, y, z) => { const o = new THREE.Mesh(geo, dark); o.position.set(x, y, z); this.view.add(o); return o; };
     if (w.pick) { add(new THREE.BoxGeometry(0.05, 0.05, 0.6), 0, 0, -0.1).material = this.m(0x6b4a2a, 'wood'); add(new THREE.BoxGeometry(0.45, 0.06, 0.06), 0, 0, -0.42); }
-    else { const L = { pistol: 0.25, smg: 0.45, rifle: 0.65, shotgun: 0.7, sniper: 0.9, lmg: 0.8 }[w.type] || 0.5;
+    else { const L = { pistol: 0.25, smg: 0.45, rifle: 0.65, shotgun: 0.7, sniper: 0.9, lmg: 0.8, launcher: 1.0 }[w.type] || 0.5;
       add(new THREE.BoxGeometry(0.07, 0.1, L), 0, 0, -L / 2); add(new THREE.BoxGeometry(0.06, 0.16, 0.08), 0, -0.1, -0.05);
       if (w.type !== 'pistol') add(new THREE.BoxGeometry(0.05, 0.12, 0.07), 0, -0.1, -L * 0.55);
       if (w.adsZoom > 1.2) add(new THREE.CylinderGeometry(0.03, 0.03, 0.2, 8), 0, 0.08, -0.15).rotation.x = Math.PI / 2;
@@ -202,7 +202,9 @@ export class Game {
     if (w.reloading > 0) { w.reloading -= dt; if (w.reloading <= 0) { if (w.reserve !== undefined) { const t = Math.min(w.mag - w.ammo, w.reserve); w.ammo += t; w.reserve -= t; } else w.ammo = w.mag; this.hooks.hud(this); } return; }
     if ((consume('KeyR', 'btn_reload') || w.ammo <= 0) && w.ammo < w.mag && !(w.reserve <= 0)) { w.reloading = w.reload; if (w.gimmick === 'throw') this.throwGun(w); this.sfx('reload'); this.hooks.toast('Reloading'); return; }
     w.bloom = Math.max(0, (w.bloom || 0) - dt * w.spread * (w.sinceShot > 0.25 ? 4 : 0.8)); w.sinceShot = (w.sinceShot || 0) + dt; if (w.sinceShot > 0.35) w.shotN = 0;
+    if (w.lock) this.trackLock(w, dt);
     if (!input.fire || this.fireT > 0) return;
+    if (w.lock) { if (this.semiHeld) return; this.semiHeld = true; this.fireT = 60 / w.rpm; w.ammo--; this.sfx('sniper'); this.fireLauncher(w); this.recoilP += w.recoil; this.kick = 1; this.hooks.hud(this); return; }
     if (!w.auto) { if (this.semiHeld) return; this.semiHeld = true; }
     this.fireT = 60 / w.rpm; w.ammo--; this.player.firedT = 1.5; this.sfx(Game.gunSound(w));
     const moving = Math.hypot(input.move.x, input.move.y) > 0.1, ads = this.adsT > 0.5;
@@ -219,6 +221,20 @@ export class Game {
     if (this.flash) { this.flash.visible = true; setTimeout(() => this.flash && (this.flash.visible = false), 40); }
     this.hooks.hud(this);
   }
+  // Lock-on launcher: hold the crosshair on an enemy vehicle for 1.2s to lock; locked missiles home, unlocked rockets fly straight.
+  trackLock(w, dt) { const o = this.camera.position, d = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion); let best = null, ba = 0.14;
+    for (const v of this.vehicles) if (v.alive && v.team !== this.player.team) { const t = v.pos.clone().setY(v.pos.y + 1).sub(o); if (t.length() > 200) continue; const a = t.normalize().angleTo(d); if (a < ba) { ba = a; best = v; } }
+    if (best && best === this.lockV) { const was = this.lockT; this.lockT += dt; if (was < 1.2 && this.lockT >= 1.2) { this.hooks.toast(`LOCKED: ${best.K.name}`); this.sfx('ui'); } } else { this.lockV = best; this.lockT = 0; } }
+  fireLauncher(w) { const P = this.player, o = this.view.localToWorld(new THREE.Vector3(0, 0, -0.8)), d = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion);
+    const m = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 0.6, 6), this.m(0xd8d8d8, 'metal')); m.position.copy(o); this.scene.add(m);
+    (this.missiles = this.missiles || []).push({ mesh: m, pos: m.position, vel: d.multiplyScalar(45), target: this.lockT >= 1.2 ? this.lockV : null, life: 6, dmg: w.dmg, src: P }); this.lockT = 0; }
+  updateMissiles(dt) { if (!this.missiles) return; for (const s of this.missiles.slice()) { s.life -= dt; const t = s.target;
+      if (t && t.alive) { const want = t.pos.clone().setY(t.pos.y + 1).sub(s.pos).normalize().multiplyScalar(45); s.vel.lerp(want, Math.min(1, dt * 4)); }
+      const step = s.vel.clone().multiplyScalar(dt); this.ray.set(s.pos, step.clone().normalize()); this.ray.far = step.length() + 0.5; const h = this.firstHit(s.src);
+      let boom = h ? h.point : null; if (t && t.alive && s.pos.distanceTo(t.pos.clone().setY(t.pos.y + 1)) < t.K.r + 1) { boom = s.pos.clone(); this.hurtVehicle(t, 350, s.src); }
+      if (!boom && (s.life <= 0 || s.pos.y < 0)) boom = s.pos.clone();
+      if (boom) { this.explode(boom, s.dmg, 3.5, s.src); this.scene.remove(s.mesh); this.missiles = this.missiles.filter(x => x !== s); continue; }
+      s.pos.add(step); s.mesh.lookAt(s.pos.clone().add(s.vel)); s.mesh.rotateX(Math.PI / 2); } }
   // Loot gimmicks
   lootMul(w, t, head) { if (!w?.loot) return 1; const A = w.affixes || []; let m = 1;
     if (head && A.includes('headhunter')) m *= 1.25; if (t.sh > 0 && A.includes('breaker')) m *= 1.25; if (t.hp < t.maxHp * 0.35 && A.includes('executioner')) m *= 1.2;
@@ -235,6 +251,7 @@ export class Game {
     if (ud.kind === 'unit') { const ch = this.cls === 'sparkwright' ? 0.06 * lv(this.save, 'charged') : 0, el = w?.elem || (ch && !w?.pick ? 'shock' : null);
     if (w && el && ud.unit.team !== src.team && Math.random() < (w.elem ? w.elemChance : 0) + ch) { ud.unit.dot = { elem: el, dps: (w.elemDps || Math.round(w.dmg * 0.5)) * (1 + 0.2 * this.sk('conductor')), t: 4 + this.sk('catalyst'), acc: 0, src }; } const P = this.player, bonus = src === P ? (head ? 1 + 0.12 * lv(this.save, 'deadeye') * (this.cls === 'ghostwire') : 1) * (P.cloakShot ? 3 + 0.5 * this.sk('ambush') : 1) * (1 + 0.04 * this.sk('stopping')) * (w && (w.type === 'rifle' || w.type === 'sniper') ? 1 + 0.05 * this.sk('longshot') : 1) * (head && ud.unit.sh <= 0 && this.sk('execution') ? 1.5 : 1) * (ud.unit.dot ? 1 + 0.05 * this.sk('amp') : 1) * this.lootMul(w, ud.unit, head) : 1; if (src === P) P.cloakShot = false; this.hurt(ud.unit, dmg * (head ? 2 : 1) * bonus, src, head); }
     else if (ud.kind === 'rune') { if (src?.isPlayer && this.zRune) this.zRune(h.object); }
+    else if (ud.kind === 'vehicle' && pick && src.isPlayer && ud.vehicle.team === src.team) { if (this.cls === 'sparkwright') { const v = ud.vehicle; v.hp = Math.min(v.K.hp, v.hp + 90); this.hooks.toast(`Repairing ${v.K.name}: ${Math.round(v.hp / v.K.hp * 100)}%`); } }
     else if (ud.kind === 'vehicle') this.hurtVehicle(ud.vehicle, dmg * (w?.elem === 'corrosive' ? 1.5 : 1), src);
     else if (ud.kind === 'build') { const b = ud.build; b.hp -= dmg * (pick ? 2 : 1); b.mesh.material.opacity = 1; if (b.hp <= 0) this.removeBuild(b); }
     else if (ud.kind === 'harvest' && src.isPlayer && pick) {
@@ -453,7 +470,7 @@ export class Game {
     P.yaw -= input.look.x * sens; P.pitch = THREE.MathUtils.clamp(P.pitch - input.look.y * sens - this.recoilP, -1.5, 1.5);
     this.recoilP *= 0.6; P.pitch += 0; 
     if (consume('KeyM', 'btn_map')) { this.overview = !this.overview; this.hooks.maps(this, this.overview); }
-    this.updatePickups(dt); this.updateNades(dt); for (const u of this.units) u.meleeCd = (u.meleeCd || 0) - dt;
+    this.updatePickups(dt); this.updateNades(dt); this.updateMissiles(dt); for (const u of this.units) u.meleeCd = (u.meleeCd || 0) - dt;
     if (consume('KeyF', 'btn_enter')) { if (this.interact?.()) {} else if (!P.vehicle && !this.near && this.nearChest) this.openChest(this.nearChest); else if (!P.vehicle && !this.near && !this.nearPick && this.lastLoot && this.lastLoot.t > 0) this.equipLoot(this.lastLoot.uid); else if (P.vehicle || this.near || !this.nearPick) this.toggleVehicle(); else this.swapWeapon(); }
     if (P.alive && P.vehicle) { this.buildMode = null; this.pilot(P.vehicle, dt); }
     else if (P.alive) {
@@ -465,7 +482,7 @@ export class Game {
       this.moveUnit(P, mx * sp * dt, mz * sp * dt, dt, input.jump);
       if (consume('KeyV', 'btn_melee')) this.melee(P);
       if (consume('KeyH', 'btn_skill')) this.useSkill();
-      if (consume('KeyT', 'btn_ntype')) { this.nadeType = this.nadeType === 'frag' ? 'plasma' : 'frag'; this.hooks.hud(this); }
+      if (consume('KeyT', 'btn_ntype')) { this.nadeType = { frag: 'plasma', plasma: 'emp', emp: 'frag' }[this.nadeType]; this.hooks.hud(this); }
       if (consume('KeyG', 'btn_nade')) { const d = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion); d.y += 0.15; d.normalize(); if (!this.throwNade(P, this.nadeType, d)) this.hooks.toast(`No ${this.nadeType} grenades`); }
       if (this.buildMode) { this.placeCd = (this.placeCd || 0) - dt; this.updateGhost(); if (input.fire) this.place(); if (consume('KeyR', 'btn_reload')) this.buildRot++; }
       else { this.ghost.visible = false; this.playerFire(dt); }
@@ -482,8 +499,10 @@ export class Game {
       const r = new THREE.Vector3(1, 0, 0).applyEuler(this.camera.rotation);
       this.camera.position.set(P.pos.x, P.pos.y + K.camH, P.pos.z).addScaledVector(f, K.camDist).addScaledVector(r, 1.8); this.view.visible = false; this.hooks.scope(false); }
     else this.camera.position.set(P.pos.x, P.pos.y + EYE, P.pos.z);
-    this.near = null; if (!P.vehicle && P.alive) for (const v of this.vehicles) if (v.alive && v.team === P.team && v.pos.distanceTo(P.pos) < 5 && v.seats.some(s => !s.unit)) { this.near = v; break; }
-    for (const v of this.vehicles) if (!v.alive) { v.respawn -= dt; if (v.respawn <= 0) this.respawnVehicle(v); }
+    this.near = null; this.hijack = null; if (!P.vehicle && P.alive) for (const v of this.vehicles) { if (!v.alive) continue; const d = v.pos.distanceTo(P.pos);
+      if (v.team === P.team && d < 5 && v.seats.some(s => !s.unit)) { this.near = v; break; }
+      if (v.team !== P.team && (v.K.mode === 'car' || v.K.mode === 'tracked' || v.K.mode === 'walker' || v.K.mode === 'boat') && d < v.K.r + 2.2 && Math.abs(v.pos.y - P.pos.y) < 4) this.hijack = v; }
+    for (const v of this.vehicles) if (v.alive) v.empT = Math.max(0, (v.empT || 0) - dt); else { v.respawn -= dt; if (v.respawn <= 0) this.respawnVehicle(v); }
     // view-distance LOD: skip drawing far bots
     const lod = this.tier === 'low' ? 85 : 160; for (const u of this.units) if (u.mesh && u.alive) u.mesh.visible = !u.vehicle && u.pos.distanceTo(P.pos) < lod;
     for (const v of this.vehicles) if (v.alive) v.mesh.visible = v.pos.distanceTo(P.pos) < lod * 2.2;
@@ -530,7 +549,7 @@ export class Game {
   throwNade(u, type, dir) {
     if (u.isPlayer) this.sfx("nade");
     if (!u.nades[type]) return false; u.nades[type]--;
-    const mesh = new THREE.Mesh(new THREE.SphereGeometry(type === 'plasma' ? 0.16 : 0.13, 8, 6), type === 'plasma' ? new THREE.MeshBasicMaterial({ color: 0x6fd0ff }) : this.m(0x3a4a2a));
+    const mesh = new THREE.Mesh(new THREE.SphereGeometry(type === 'plasma' ? 0.16 : 0.13, 8, 6), type === 'emp' ? new THREE.MeshBasicMaterial({ color: 0xc8a0ff }) : type === 'plasma' ? new THREE.MeshBasicMaterial({ color: 0x6fd0ff }) : this.m(0x3a4a2a));
     const pos = u.pos.clone(); pos.y += EYE; pos.addScaledVector(dir, 0.6); mesh.position.copy(pos); this.scene.add(mesh);
     this.nadesLive.push({ u, type, mesh, pos, vel: dir.clone().multiplyScalar(17).add(new THREE.Vector3(0, 3.5, 0)), fuse: type === 'plasma' ? 1.8 : 2.4, stuck: null, stuckOff: null, landed: false });
     if (u.isPlayer) this.hooks.hud(this); return true;
@@ -550,7 +569,7 @@ export class Game {
         }
       }
       n.mesh.position.copy(n.pos); if (n.type === 'plasma') n.mesh.scale.setScalar(1 + Math.sin(n.fuse * 30) * 0.2);
-      if ((n.fuse -= dt) <= 0) { this.scene.remove(n.mesh); this.nadesLive = this.nadesLive.filter(q => q !== n); this.explode(n.pos.clone(), n.type === 'plasma' ? 140 : 115, n.type === 'plasma' ? 4.5 : 6, n.u); }
+      if ((n.fuse -= dt) <= 0) { this.scene.remove(n.mesh); this.nadesLive = this.nadesLive.filter(q => q !== n); if (n.type === 'emp') this.emp(n.pos.clone(), n.u); else this.explode(n.pos.clone(), n.type === 'plasma' ? 140 : 115, n.type === 'plasma' ? 4.5 : 6, n.u); }
     }
   }
   // Melee: quick strike, triple damage from behind.
@@ -578,10 +597,18 @@ export class Game {
     u.vy = 0; if (u.mesh) u.mesh.visible = true;
     if (u.isPlayer) { this.selectSlot(this.slot); this.hooks.toast('Exited vehicle'); this.hooks.hud(this); }
   }
-  toggleVehicle() { const P = this.player; if (P.vehicle) return this.exitVehicle(P); if (this.near) this.enterVehicle(P, this.near); }
+  toggleVehicle() { const P = this.player; if (P.vehicle) return this.exitVehicle(P); if (this.near) return this.enterVehicle(P, this.near); if (this.hijack) this.hijackVehicle(this.hijack); }
+  // Halo-style boarding: throw the crew out (they don't survive it) and take the vehicle for your team.
+  hijackVehicle(v) { const P = this.player; for (const s of v.seats) if (s.unit) { const u = s.unit; s.unit = null; u.vehicle = null; if (u.mesh) u.mesh.visible = true; u.pos.copy(v.pos); u.spawnProt = 0; u.sh = 0; this.hurt(u, 9999, P, false); }
+    v.team = P.team; v.mesh.traverse(o => { if (o.material?.color && o.material.type === 'MeshBasicMaterial') o.material = new THREE.MeshBasicMaterial({ color: 0x66e0ff }); }); this.enterVehicle(P, v); this.hooks.toast(`HIJACKED ${v.K.name}`); this.stats.hijacks = (this.stats.hijacks || 0) + 1; }
+  // EMP: vehicles in range lose controls and weapons for 3s; infantry shields are stripped.
+  emp(pos, src) { this.sfx('shieldBreak', pos); for (const v of this.vehicles) if (v.alive && v.team !== src.team && v.pos.distanceTo(pos) < 7 + v.K.r) { v.empT = 3; if (src.isPlayer) this.hooks.toast(`${v.K.name} EMP'd`); }
+    for (const u of this.units) if (u.alive && u.team !== src.team && u.pos.distanceTo(pos) < 5 && u.sh > 0) { u.sh = 0; u.shT = 0; this.shieldPop(u); }
+    if (this.tier !== 'low') { const fx = new THREE.Mesh(new THREE.SphereGeometry(6, 10, 8), new THREE.MeshBasicMaterial({ color: 0xc8a0ff, transparent: true, opacity: 0.35, depthWrite: false })); fx.position.copy(pos); this.scene.add(fx); setTimeout(() => this.scene?.remove(fx), 250); } }
   isWater(x, z) { const w = this.layout.water; return !!w && w.some(r => x > r[0] && x < r[1] && z > r[2] && z < r[3]); }
   // ctrl: { mx, my (-1..1), aimYaw, aimPitch, up, down, fire, alt, special }
   drive(v, c, dt) {
+    if (v.empT > 0) c = { mx: 0, my: 0, aimYaw: v.yaw, aimPitch: 0 }; // EMP: controls dead
     const K = v.K, mode = K.mode; let mx = 0, mz = 0;
     v.cd = v.cd.map(t => t - dt); K.weapons.forEach((w, i) => { if (w.regen && v.ammo[i] < w.ammoMax) v.ammo[i] = Math.min(w.ammoMax, v.ammo[i] + dt / w.regen); });
     const fwd = y => [-Math.sin(y), -Math.cos(y)];
@@ -634,6 +661,7 @@ export class Game {
   }
   airHit(v, n) { for (const s of this.solids) if (s !== v.solid && n.x > s.min.x - 1 && n.x < s.max.x + 1 && n.z > s.min.z - 1 && n.z < s.max.z + 1 && n.y > s.min.y - 0.5 && n.y < s.max.y + 0.5) return true; return false; }
   vfire(v, i, c, shooter) {
+    if (v.empT > 0) return;
     const w = v.K.weapons[i]; if (v.cd[i] > 0) return; if (w.ammoMax && v.ammo[i] < 1) return; v.cd[i] = w.cd || 60 / w.rpm; if (w.ammoMax) v.ammo[i]--;
     const src = shooter || v.seats[0].unit || { team: v.team, name: v.K.name }; this.sfx(w.splash || w.key === 'stomp' ? 'cannon' : 'chain', v.pos);
     if (w.key === 'stomp') { this.explode(v.pos, w.dmg, w.splash, src, true); if (src.isPlayer) this.hooks.toast('STOMP'); return; }
@@ -722,7 +750,7 @@ export class Game {
   hurtVehicle(v, dmg, src) {
     if (!v.alive || (src && src.team === v.team && !arguments[3])) return; v.hp -= dmg; if (src?.isPlayer) this.hooks.hitmark(false);
     if (v.seats.some(s => s.unit === this.player)) this.hooks.hurt();
-    if (v.hp <= 0) { v.alive = false; v.respawn = 30; v.mesh.visible = false; this.solids = this.solids.filter(s => s !== v.solid);
+    if (v.hp <= 0) { v.alive = false; v.respawn = { mech: 45, tank: 60, buggy: 20, boat: 25, heli: 50, jet: 60 }[v.kind] || 30; v.mesh.visible = false; this.solids = this.solids.filter(s => s !== v.solid);
       for (const s of v.seats) if (s.unit) { const u = s.unit; s.unit = null; u.vehicle = null; u.hp = Math.min(u.hp, 50); u.sh = 0; u.pos.y = 0; if (u.mesh) u.mesh.visible = true; if (v.K.mode === 'jet' || v.K.mode === 'heli') { u.vehicle = null; this.hurt(u, 9999, src || u, false); } if (u === this.player) { this.selectSlot(this.slot); this.hooks.toast(`${v.K.name} destroyed!`); } }
       this.explode(v.pos.clone().setY(v.pos.y + 1), 60, 5, src || { team: -1, name: v.K.name }); if (src?.isPlayer) { this.stats.kills++; this.hooks.toast(`${v.K.name} destroyed +100 XP`); } }
     this.hooks.hud(this);
