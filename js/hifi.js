@@ -118,3 +118,43 @@ export function animate(u, dt) {
   L.hip.rotation.x = s * 0.7 * w; R.hip.rotation.x = -s * 0.7 * w; L.knee.rotation.x = Math.max(0, -c) * 1.0 * w; R.knee.rotation.x = Math.max(0, c) * 1.0 * w;
   rig.body.position.y = rig.base + Math.abs(s) * 0.04 * w; if (u.zombie) { L.hip.rotation.x *= 0.6; R.hip.rotation.x *= 0.6; }
 }
+
+// ---------- buildings: world-scaled PBR, trim, decals ----------
+// Re-map a BoxGeometry's UVs so textures keep real-world scale (one tile = `tile` meters) on every face.
+export function worldUV(geo, w, h, d, tile = 3) {
+  const uv = geo.attributes.uv, nrm = geo.attributes.normal, pos = geo.attributes.position;
+  for (let i = 0; i < uv.count; i++) { const nx = Math.abs(nrm.getX(i)), ny = Math.abs(nrm.getY(i)), x = pos.getX(i) + w / 2, y = pos.getY(i) + h / 2, z = pos.getZ(i) + d / 2;
+    if (nx > 0.5) uv.setXY(i, z / tile, y / tile); else if (ny > 0.5) uv.setXY(i, x / tile, z / tile); else uv.setXY(i, x / tile, y / tile); }
+  uv.needsUpdate = true; return geo;
+}
+const BMAT = {};
+function bmat(kind, color) { const k = kind + color; if (BMAT[k]) return BMAT[k];
+  const set = { concrete: 'concrete', metal: 'metal', wood: 'wood' }[kind] || 'concrete';
+  return (BMAT[k] = pbr(set, new THREE.Color(color).lerp(new THREE.Color(0xffffff), 0.25), { metalness: set === 'metal' ? 0.75 : 0, roughness: 1, normalScale: set === 'wood' ? 1.2 : 1 })); }
+let grimeTex = null, signTex = null;
+function grime() { if (grimeTex) return grimeTex; const c = document.createElement('canvas'); c.width = 64; c.height = 256; const g = c.getContext('2d');
+  const gr = g.createLinearGradient(0, 0, 0, 256); gr.addColorStop(0, 'rgba(30,25,18,0)'); gr.addColorStop(0.7, 'rgba(30,25,18,.25)'); gr.addColorStop(1, 'rgba(25,20,12,.6)'); g.fillStyle = gr; g.fillRect(0, 0, 64, 256);
+  for (let i = 0; i < 40; i++) { g.fillStyle = `rgba(20,16,10,${Math.random() * 0.25})`; g.fillRect(Math.random() * 64, Math.random() * 120, 1 + Math.random() * 2, 30 + Math.random() * 90); } // rain streaks
+  grimeTex = new THREE.CanvasTexture(c); grimeTex.colorSpace = THREE.SRGBColorSpace; grimeTex.wrapS = THREE.RepeatWrapping; return grimeTex; }
+function sign() { if (signTex) return signTex; const c = document.createElement('canvas'); c.width = 256; c.height = 128; const g = c.getContext('2d');
+  g.fillStyle = '#d8b13a'; g.fillRect(0, 0, 256, 128); g.fillStyle = '#1b1b1b'; for (let x = -128; x < 256; x += 36) { g.beginPath(); g.moveTo(x, 128); g.lineTo(x + 18, 128); g.lineTo(x + 146, 0); g.lineTo(x + 128, 0); g.fill(); }
+  g.fillStyle = '#1b1b1b'; g.fillRect(36, 34, 184, 60); g.fillStyle = '#e8e2d0'; g.font = 'bold 40px monospace'; g.textAlign = 'center'; g.fillText('FF-07', 128, 78);
+  signTex = new THREE.CanvasTexture(c); signTex.colorSpace = THREE.SRGBColorSpace; return signTex; }
+let trimM = null, grimeM = null, signM = null;
+export function building(x, z, w, d, h, color, kind) {
+  const geo = worldUV(new THREE.BoxGeometry(w, h, d), w, h, d, kind === 'wood' ? 2 : 3), mesh = new THREE.Mesh(geo, bmat(kind, color));
+  mesh.position.set(x, h / 2, z); mesh.castShadow = mesh.receiveShadow = true;
+  trimM = trimM || pbr('metal', 0x5a5e62, { metalness: 0.8, roughness: 0.8 });
+  grimeM = grimeM || new THREE.MeshStandardMaterial({ map: grime(), transparent: true, depthWrite: false, roughness: 1, polygonOffset: true, polygonOffsetFactor: -2 });
+  signM = signM || new THREE.MeshStandardMaterial({ map: sign(), roughness: 0.6, polygonOffset: true, polygonOffsetFactor: -2 });
+  const extras = [];
+  if (h > 1.2 && kind !== 'wood') { // roof coping + base plinth
+    const cap = new THREE.Mesh(new THREE.BoxGeometry(w + 0.16, 0.14, d + 0.16), trimM); cap.position.set(x, h + 0.07, z); extras.push(cap);
+    const base = new THREE.Mesh(worldUV(new THREE.BoxGeometry(w + 0.08, 0.3, d + 0.08), w + 0.08, 0.3, d + 0.08), bmat('concrete', 0x77736b)); base.position.set(x, 0.15, z); extras.push(base); }
+  if (kind === 'wood' && h > 1) for (const sx of [-1, 1]) for (const sz of [-1, 1]) { const post = new THREE.Mesh(new THREE.BoxGeometry(0.12, h, 0.12), trimM); post.position.set(x + sx * (w / 2 - 0.02), h / 2, z + sz * (d / 2 - 0.02)); extras.push(post); }
+  if (h > 1.5 && !isPhone) for (const [nx, nz, len] of [[0, 1, w], [0, -1, w], [1, 0, d], [-1, 0, d]]) { // grime/streak decals on each face
+    const p = new THREE.Mesh(new THREE.PlaneGeometry(len, h), grimeM); p.position.set(x + nx * (w / 2 + 0.01), h / 2, z + nz * (d / 2 + 0.01)); p.rotation.y = Math.atan2(nx, nz); p.material.map.repeat.x = 1; extras.push(p); }
+  if (h > 2.5 && w > 3 && ((x * 7 + z * 13) & 3) === 0) { const s = new THREE.Mesh(new THREE.PlaneGeometry(1.6, 0.8), signM); s.position.set(x, Math.min(h - 0.8, 2.2), z + d / 2 + 0.02); extras.push(s); }
+  for (const e of extras) { e.castShadow = e.geometry.type === 'BoxGeometry'; e.receiveShadow = true; }
+  return { mesh, extras };
+}

@@ -97,8 +97,9 @@ export class Game {
     if (!this.loopOn) { this.loopOn = true; const loop = t => { requestAnimationFrame(loop); this.frame(t); }; requestAnimationFrame(loop); }
   }
   addBox(x, z, w, d, h, color, kind) {
-    const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), this.m(color, kind, Math.max(1, Math.round(w / 4))));
-    mesh.position.set(x, h / 2, z); mesh.castShadow = mesh.receiveShadow = true; mesh.userData.kind = 'static'; this.scene.add(mesh); this.hitMeshes.push(mesh);
+    let mesh;
+    if (this.hf) { const b = this.hf.building(x, z, w, d, h, color, kind); mesh = b.mesh; for (const e of b.extras) this.scene.add(e); }
+    else { mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), this.m(color, kind, Math.max(1, Math.round(w / 4)))); mesh.position.set(x, h / 2, z); } mesh.castShadow = mesh.receiveShadow = true; mesh.userData.kind = 'static'; this.scene.add(mesh); this.hitMeshes.push(mesh);
     this.solids.push({ min: new THREE.Vector3(x - w / 2, 0, z - d / 2), max: new THREE.Vector3(x + w / 2, h, z + d / 2) });
   }
   gunDef(id) { if (typeof id === 'string' && id[0] === 'L') return this.save.inv.find(x => 'L' + x.uid === id) || GUNS.kr4; return GUNS[id] || RENTALS[id] || GUNS.kr4; }
