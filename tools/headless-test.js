@@ -2,7 +2,7 @@
 const { spawn } = require('child_process');
 const http = require('http');
 const url = process.argv[2], out = process.argv[3], script = process.argv[4] || '';
-const ch = spawn('google-chrome', ['--headless=new', '--no-sandbox', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--remote-debugging-port=9333', '--window-size=1280,720', 'about:blank']);
+const ch = spawn('google-chrome', ['--headless=new', '--no-sandbox', '--autoplay-policy=no-user-gesture-required', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--remote-debugging-port=9333', '--window-size=1280,720', 'about:blank']);
 setTimeout(async () => {
   const list = await new Promise(r => http.get('http://127.0.0.1:9333/json', res => { let d = ''; res.on('data', c => d += c); res.on('end', () => r(JSON.parse(d))); }));
   const ws = new WebSocket(list.find(t => t.type === 'page').webSocketDebuggerUrl); let id = 0; const pend = {};

@@ -24,7 +24,7 @@ export class Game {
 
   // ---------- match setup ----------
   start(mapId, mode = 'tdm') {
-    this.choosing = false;
+    this.choosing = false; this.sfx = () => {}; this.engine = () => {};
     const M = this.map = MAPS[mapId]; this.mode = mode; const L = M.gen(); this.layout = L;
     const s = this.scene = new THREE.Scene(); s.background = new THREE.Color(M.sky);
     s.fog = new THREE.Fog(M.sky, M.size * 0.6, M.size * 1.6);
@@ -182,10 +182,10 @@ export class Game {
     if (w.pick) { if (input.fire && this.fireT <= 0) { this.fireT = 0.45; this.swing = 0.25; this.aimRay(0); this.ray.far = 3;
         const h = this.firstHit(this.player); if (h) this.damageAt(h, 30, this.player, false, true); } return; }
     if (w.reloading > 0) { w.reloading -= dt; if (w.reloading <= 0) { w.ammo = w.mag; this.hooks.hud(this); } return; }
-    if ((consume('KeyR', 'btn_reload') || w.ammo <= 0) && w.ammo < w.mag) { w.reloading = w.reload; this.hooks.toast('Reloading'); return; }
+    if ((consume('KeyR', 'btn_reload') || w.ammo <= 0) && w.ammo < w.mag) { w.reloading = w.reload; this.sfx('reload'); this.hooks.toast('Reloading'); return; }
     if (!input.fire || this.fireT > 0) return;
     if (!w.auto) { if (this.semiHeld) return; this.semiHeld = true; }
-    this.fireT = 60 / w.rpm; w.ammo--; this.player.firedT = 1.5;
+    this.fireT = 60 / w.rpm; w.ammo--; this.player.firedT = 1.5; this.sfx(Game.gunSound(w));
     const moving = Math.hypot(input.move.x, input.move.y) > 0.1, ads = this.adsT > 0.5;
     const spread = w.spread * (ads ? 0.3 : 1) * (moving ? 1.6 : 1) * (this.player.onGround ? 1 : 2);
     for (let i = 0; i < (w.pellets || 1); i++) {
@@ -345,7 +345,7 @@ export class Game {
       if (g.reloading > 0) { g.reloading -= dt; if (g.reloading <= 0) g.ammo = g.mag; }
       else if (g.ammo <= 0) g.reloading = g.reload * 1.2;
       else if (g.cd <= 0 && u.seeT > 0.45) {
-        g.cd = 60 / g.rpm * (g.auto ? 1.6 : 1.2); g.ammo--; u.firedT = 1.5;
+        g.cd = 60 / g.rpm * (g.auto ? 1.6 : 1.2); g.ammo--; u.firedT = 1.5; this.sfx(Game.gunSound(g), u.pos);
         const vis = this.canSee(u, t); const from = u.pos.clone(); from.y += 1.3;
         if (vis === false) {}
         else if (vis !== true) { if (['build', 'vehicle'].includes(vis.object?.userData.kind)) this.damageAt(vis, g.dmg, u); this.tracer(from, vis.point); }
@@ -382,6 +382,8 @@ export class Game {
   }
   tick(dt, first) {
     this.lastDt = dt; this.navBudget += 3;
+    { const p = this.player; if (p?.alive && !p.vehicle && p.onGround) { const m = Math.hypot(p.pos.x - (this.stepX ?? p.pos.x), p.pos.z - (this.stepZ ?? p.pos.z)); this.stepD = (this.stepD || 0) + m; if (this.stepD > 2.4) { this.stepD = 0; this.sfx('step'); } } if (p) { this.stepX = p.pos.x; this.stepZ = p.pos.z; }
+      const v = p?.vehicle; if (first) this.engine(v && this.seatOf(p).role === 'driver' ? v.kind : null, v ? Math.min(1, Math.hypot(v.vx || 0, v.vz || 0) / 25) : 0); }
     if (!first) { input.look.x = input.look.y = 0; } const P = this.player, w = this.slots[this.slot];
     this.timeLeft -= dt; if (this.timeLeft <= 0 && !this.over) this.end();
     // input actions
@@ -473,6 +475,7 @@ export class Game {
   }
   // Grenades: frag bounces on a fuse; plasma sticks to whatever it touches first.
   throwNade(u, type, dir) {
+    if (u.isPlayer) this.sfx("nade");
     if (!u.nades[type]) return false; u.nades[type]--;
     const mesh = new THREE.Mesh(new THREE.SphereGeometry(type === 'plasma' ? 0.16 : 0.13, 8, 6), type === 'plasma' ? new THREE.MeshBasicMaterial({ color: 0x6fd0ff }) : this.m(0x3a4a2a));
     const pos = u.pos.clone(); pos.y += EYE; pos.addScaledVector(dir, 0.6); mesh.position.copy(pos); this.scene.add(mesh);
@@ -499,6 +502,7 @@ export class Game {
   }
   // Melee: quick strike, triple damage from behind.
   melee(u) {
+    this.sfx("melee", u.isPlayer ? null : u.pos);
     if ((u.meleeCd || 0) > 0) return; u.meleeCd = 0.8; let best = null, bd = 2.6;
     const f = new THREE.Vector3(-Math.sin(u.yaw), 0, -Math.cos(u.yaw));
     for (const t of this.units) if (t.alive && t.team !== u.team) { const d = t.pos.clone().sub(u.pos); const dist = d.length(); d.y = 0; d.normalize(); if (dist < bd && d.dot(f) > 0.5) { bd = dist; best = t; } }
@@ -578,7 +582,7 @@ export class Game {
   airHit(v, n) { for (const s of this.solids) if (s !== v.solid && n.x > s.min.x - 1 && n.x < s.max.x + 1 && n.z > s.min.z - 1 && n.z < s.max.z + 1 && n.y > s.min.y - 0.5 && n.y < s.max.y + 0.5) return true; return false; }
   vfire(v, i, c, shooter) {
     const w = v.K.weapons[i]; if (v.cd[i] > 0) return; if (w.ammoMax && v.ammo[i] < 1) return; v.cd[i] = w.cd || 60 / w.rpm; if (w.ammoMax) v.ammo[i]--;
-    const src = shooter || v.seats[0].unit || { team: v.team, name: v.K.name };
+    const src = shooter || v.seats[0].unit || { team: v.team, name: v.K.name }; this.sfx(w.splash || w.key === 'stomp' ? 'cannon' : 'chain', v.pos);
     if (w.key === 'stomp') { this.explode(v.pos, w.dmg, w.splash, src, true); if (src.isPlayer) this.hooks.toast('STOMP'); return; }
     const muzzle = v.pos.clone(); muzzle.y += v.K.eye + (v.K.mode === 'heli' || v.K.mode === 'jet' ? -0.6 : 0);
     let h;
@@ -631,7 +635,9 @@ export class Game {
     if (mode === 'car' && v.seats[1].unit) this.botGunner(v, v.seats[1], dt);
     this.drive(v, c, dt);
   }
+  static gunSound(g) { return { pistol: 'pistol', smg: 'smg', shotgun: 'shotgun', sniper: 'sniper' }[g.type] || 'rifle'; }
   explode(pt, dmg, r, src, ground) {
+    this.sfx('explode', pt);
     const fx = new THREE.Mesh(new THREE.SphereGeometry(r * 0.5, 10, 6), new THREE.MeshBasicMaterial({ color: 0xffa040, transparent: true, opacity: 0.7 }));
     fx.position.copy(pt); this.scene.add(fx); setTimeout(() => this.scene && this.scene.remove(fx), 180);
     for (const u of this.units) if (u.alive && u !== src) { const d = u.pos.distanceTo(pt); if (d < r) this.hurt(u, dmg * (1 - d / r * 0.6), src, false); }
@@ -647,16 +653,17 @@ export class Game {
       c.contested = n0 > 0 && n1 > 0; const push = (n0 - n1) * 0.12 * dt; const before = c.owner;
       if (push) { c.prog = THREE.MathUtils.clamp(c.prog + push, -1, 1); if (c.prog >= 1) c.owner = 0; else if (c.prog <= -1) c.owner = 1; else if ((c.owner === 0 && c.prog < 0) || (c.owner === 1 && c.prog > 0)) c.owner = -1; }
       if (before !== c.owner && (n0 && this.player.team === 0 && Math.hypot(this.player.pos.x - c.x, this.player.pos.z - c.z) < 8)) { this.hooks.toast(c.owner === 0 ? `Captured ${c.n} ${c.name} +200 XP` : `${c.n} neutralized`); if (c.owner === 0) this.stats.caps = (this.stats.caps || 0) + 1; }
+      if (before !== c.owner && c.owner !== -1) this.sfx(c.owner === this.player.team ? 'capture' : 'lost'); else if (before === this.player.team && c.owner === -1) this.sfx('lost');
       const col = c.owner === 0 ? 0x4f8fff : c.owner === 1 ? 0xff6a4a : 0xffffff; c.flag.material.color.set(col); c.ring.material.color.set(col);
       if (tick && c.owner >= 0) { this.score[c.owner]++; if (this.score[c.owner] >= this.map.scoreLimit) this.end(); }
     }
   }
   shieldPop(u) {
-    if (u.isPlayer) { this.hooks.shieldPop(); return; }
+    this.sfx('shieldBreak', u.isPlayer ? null : u.pos); if (u.isPlayer) { this.hooks.shieldPop(); return; }
     const fx = new THREE.Mesh(new THREE.SphereGeometry(1.1, 10, 8), new THREE.MeshBasicMaterial({ color: 0x7fd8ff, transparent: true, opacity: 0.55, depthWrite: false }));
     fx.position.copy(u.pos); fx.position.y += 1.1; this.scene.add(fx); let t = 0; const step = () => { t += 0.05; fx.scale.setScalar(1 + t * 2); fx.material.opacity = 0.55 * (1 - t / 0.3); if (t < 0.3 && this.scene) requestAnimationFrame(step); else this.scene?.remove(fx); }; step();
   }
-  regenShields(dt) { for (const u of this.units) if (u.alive) { u.shT += dt; if (u.shT > 4 && u.sh < u.maxSh) { const was = u.sh; u.sh = Math.min(u.maxSh, u.sh + 35 * dt); if (u.isPlayer && was === 0) this.hooks.toast('Shield recharging'); } } }
+  regenShields(dt) { for (const u of this.units) if (u.alive) { u.shT += dt; if (u.shT > 4 && u.sh < u.maxSh) { const was = u.sh; u.sh = Math.min(u.maxSh, u.sh + 35 * dt); if (u.isPlayer && was === 0) { this.sfx('shieldUp'); this.hooks.toast('Shield recharging'); } } } }
   hurtVehicle(v, dmg, src) {
     if (!v.alive || (src && src.team === v.team && !arguments[3])) return; v.hp -= dmg; if (src?.isPlayer) this.hooks.hitmark(false);
     if (v.seats.some(s => s.unit === this.player)) this.hooks.hurt();

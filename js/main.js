@@ -4,9 +4,13 @@ import { load, save, exportCode, importCode, fresh } from './save.js';
 import { pickTier } from './gfx.js';
 import { initInput } from './input.js';
 import { Game } from './game.js';
+import { Sfx } from './audio.js';
 
 const $ = id => document.getElementById(id);
 let S = load(); const tier = pickTier(S);
+const sfx = new Sfx(tier, S.vol ?? 0.7); window.__sfx = sfx;
+for (const ev of ['pointerdown', 'keydown', 'touchstart']) addEventListener(ev, () => sfx.unlock(), { capture: true, passive: true });
+document.addEventListener('click', e => { if (e.target.closest('button')) sfx.play('ui'); });
 const canvas = $('game'); let mode = 'tdm', game;
 const screens = ['menu', 'play', 'armory', 'stats', 'settings', 'pause', 'results'];
 function show(id) { screens.forEach(s => $(s).classList.toggle('hidden', s !== id)); $('hud').classList.toggle('hidden', id !== null); render(id); }
@@ -51,7 +55,7 @@ const hooks = {
     drawMap(g, $('minimap'), false); const ov = $('overview'); ov.classList.toggle('hidden', !showOverview); if (showOverview) drawMap(g, ov, true);
   },
   toast(m) { toastEl.textContent = m; clearTimeout(toastT); toastT = setTimeout(() => toastEl.textContent = '', 1200); },
-  hitmark(head) { const h = $('hitm'); h.classList.toggle('head', head); h.style.opacity = 1; setTimeout(() => h.style.opacity = 0, 120); },
+  hitmark(head) { sfx.play(head ? 'head' : 'hit'); const h = $('hitm'); h.classList.toggle('head', head); h.style.opacity = 1; setTimeout(() => h.style.opacity = 0, 120); },
   shieldPop() { const h = $('pop'); h.classList.remove('go'); void h.offsetWidth; h.classList.add('go'); },
   hurt() { const h = $('hurt'); h.style.opacity = 1; setTimeout(() => h.style.opacity = 0, 200); },
   feed(a, b, head) { const f = $('feed'), d = document.createElement('div'); d.innerHTML = `<span class="${a.team ? 'red' : 'blue'}">${a.name}</span> ${head ? '◎' : '›'} <span class="${b.team ? 'red' : 'blue'}">${b.name}</span>`;
@@ -99,7 +103,7 @@ function applyResult(r) {
   show('results');
 }
 
-function startMatch(id) { $('spawnsel').classList.add('hidden'); $('spawnsel').dataset.k = ''; game = game || new Game(canvas, tier, S, hooks); game.paused = false; show(null); game.start(id, mode); }
+function startMatch(id) { $('spawnsel').classList.add('hidden'); $('spawnsel').dataset.k = ''; game = game || new Game(canvas, tier, S, hooks); game.paused = false; show(null); game.start(id, mode); game.sfx = (n, p) => sfx.play(n, p, p && game.camera.position); game.engine = (k, t) => sfx.setEngine(k, t); }
 
 function rankHtml() {
   const prev = S.rank ? xpForRank(S.rank - 1) : 0, next = xpForRank(S.rank), pct = Math.min(100, (S.xp - prev) / (next - prev) * 100);
@@ -115,7 +119,7 @@ function render(id) {
   if (id === 'armory') renderShop();
   if (id === 'stats') renderStats();
   if (id === 'settings') {
-    $('gLow').classList.toggle('on', tier === 'low'); $('gHigh').classList.toggle('on', tier === 'high'); $('sens').value = S.sens || 1;
+    $('gLow').classList.toggle('on', tier === 'low'); $('gHigh').classList.toggle('on', tier === 'high'); $('sens').value = S.sens || 1; $('vol').value = S.vol ?? 0.7;
   }
 }
 function renderShop() {
@@ -141,6 +145,7 @@ function renderStats() {
 }
 $('gLow').onclick = () => { S.gfx = 'low'; save(S); location.search = ''; };
 $('gHigh').onclick = () => { S.gfx = 'high'; save(S); location.search = ''; };
+$('vol').oninput = e => { S.vol = +e.target.value; sfx.setVol(S.vol); save(S); };
 $('sens').oninput = e => { S.sens = +e.target.value; save(S); };
 $('exp').onclick = () => { $('code').value = exportCode(S); $('code').select(); navigator.clipboard?.writeText($('code').value).catch(() => {}); };
 $('imp').onclick = () => { try { S = importCode($('code').value); save(S); alert('Save imported'); location.reload(); } catch (e) { alert('Invalid save code'); } };
