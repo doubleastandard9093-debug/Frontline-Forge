@@ -64,6 +64,7 @@ export class Game {
     for (let i = 0; i < foes; i++) { const b = this.makeUnit(1, false, BOT_NAMES[(i + 12) % BOT_NAMES.length]); if (mode === 'coop') b.skill = Math.min(0.95, b.skill + 0.1); }
     this.units.forEach(u => this.spawn(u));
     this.pickups = []; this.racks = (L.racks || []).map(([id, x, z]) => ({ id, x, z, t: 0 }));
+    this.nadesLive = []; this.nadeType = 'frag';
     this.vehicles = []; for (const [k, x, z, team] of (L.vehicles || [])) this.vehicles.push(createVehicle(this, k, x, z, team, ++this.nextId));
     // loadout
     const lo = this.save.loadout; this.slots = [lo.primary, lo.secondary, 'pick'].map(id => id === 'pick' ? { id, pick: true } : this.makeWeapon(id));
@@ -106,7 +107,7 @@ export class Game {
       u.pos.set(THREE.MathUtils.clamp(sp[0] + (Math.random() - 0.5) * this.map.size * 0.5, -h, h), 0, THREE.MathUtils.clamp(sp[1] + (Math.random() - 0.5) * 8, -h, h));
       if (!this.blocked(u.pos)) break;
     }
-    u.hp = u.maxHp; u.sh = u.maxSh; u.shT = 9; u.alive = true; u.vy = 0; u.yaw = u.team === 0 ? 0 : Math.PI; u.pitch = 0; u.spawnProt = 2;
+    u.hp = u.maxHp; u.nades = { frag: 2, plasma: 2 }; u.sh = u.maxSh; u.shT = 9; u.alive = true; u.vy = 0; u.yaw = u.team === 0 ? 0 : Math.PI; u.pitch = 0; u.spawnProt = 2;
     if (u.mesh) u.mesh.visible = true;
   }
   blocked(p) { for (const s of this.solids) if (p.x > s.min.x - RAD && p.x < s.max.x + RAD && p.z > s.min.z - RAD && p.z < s.max.z + RAD && s.max.y > p.y + 0.5 && s.min.y < p.y + 1.7) return true; return false; }
@@ -303,6 +304,10 @@ export class Game {
       const dist = d.length(), side = new THREE.Vector3(Math.cos(u.yaw), 0, -Math.sin(u.yaw));
       mx = side.x * u.strafe * 0.6; mz = side.z * u.strafe * 0.6;
       if (dist > g.range * 0.7) { mx += -Math.sin(u.yaw); mz += -Math.cos(u.yaw); }
+      if (dist < 2.2) this.melee(u);
+      u.nadeCd = (u.nadeCd || 6 + Math.random() * 6) - dt;
+      if (u.nadeCd <= 0 && dist > 8 && dist < 24 && u.seeT > 1) { u.nadeCd = 10 + Math.random() * 8; const type = Math.random() < 0.5 ? 'frag' : 'plasma'; const dir = t.pos.clone().sub(u.pos); const flat = Math.hypot(dir.x, dir.z); dir.y = flat * 0.18; dir.normalize();
+        const n = this.throwNade(u, type, dir); if (n) { const last = this.nadesLive[this.nadesLive.length - 1]; last.vel.multiplyScalar(Math.min(1, flat / 20) * 0.95 + 0.05); } }
       g.cd -= dt;
       if (g.reloading > 0) { g.reloading -= dt; if (g.reloading <= 0) g.ammo = g.mag; }
       else if (g.ammo <= 0) g.reloading = g.reload * 1.2;
@@ -339,7 +344,7 @@ export class Game {
     if (!first) { input.look.x = input.look.y = 0; } const P = this.player, w = this.slots[this.slot];
     this.timeLeft -= dt; if (this.timeLeft <= 0 && !this.over) this.end();
     // input actions
-    if (consume('Digit1')) this.selectSlot(0); if (consume('Digit2')) this.selectSlot(1); if (consume('Digit3', 'KeyV')) this.selectSlot(2);
+    if (consume('Digit1')) this.selectSlot(0); if (consume('Digit2')) this.selectSlot(1); if (consume('Digit3')) this.selectSlot(2);
     if (consume('btn_weapon', 'WheelDown')) this.selectSlot((this.slot + 1) % 3); if (consume('WheelUp')) this.selectSlot((this.slot + 2) % 3);
     const bm = consume('KeyZ') ? 'wall' : consume('KeyX') ? 'floor' : consume('KeyC') ? 'ramp' : null;
     if (bm) { this.buildMode = this.buildMode === bm ? null : bm; this.hooks.hud(this); }
@@ -353,7 +358,7 @@ export class Game {
     const sens = 0.0022 * (this.save.sens || 1) / (1 + (this.adsT || 0) * (w.adsZoom - 1 || 0));
     P.yaw -= input.look.x * sens; P.pitch = THREE.MathUtils.clamp(P.pitch - input.look.y * sens - this.recoilP, -1.5, 1.5);
     this.recoilP *= 0.6; P.pitch += 0; 
-    this.updatePickups(dt);
+    this.updatePickups(dt); this.updateNades(dt); for (const u of this.units) u.meleeCd = (u.meleeCd || 0) - dt;
     if (consume('KeyF', 'btn_enter')) { if (P.vehicle || this.near || !this.nearPick) this.toggleVehicle(); else this.swapWeapon(); }
     if (P.alive && P.vehicle) { this.pilot(P.vehicle, dt); }
     else if (P.alive) {
@@ -362,6 +367,9 @@ export class Game {
       const fx = -Math.sin(P.yaw), fz = -Math.cos(P.yaw), rx = Math.cos(P.yaw), rz = -Math.sin(P.yaw);
       let mx = fx * input.move.y + rx * input.move.x, mz = fz * input.move.y + rz * input.move.x; const l = Math.hypot(mx, mz); if (l > 1) { mx /= l; mz /= l; }
       this.moveUnit(P, mx * sp * dt, mz * sp * dt, dt, input.jump);
+      if (consume('KeyV', 'btn_melee')) this.melee(P);
+      if (consume('KeyT', 'btn_ntype')) { this.nadeType = this.nadeType === 'frag' ? 'plasma' : 'frag'; this.hooks.hud(this); }
+      if (consume('KeyG', 'btn_nade')) { const d = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion); d.y += 0.15; d.normalize(); if (!this.throwNade(P, this.nadeType, d)) this.hooks.toast(`No ${this.nadeType} grenades`); }
       if (this.buildMode) { this.placeCd = (this.placeCd || 0) - dt; this.updateGhost(); if (input.fire) this.place(); if (consume('KeyR', 'btn_reload')) this.buildRot++; }
       else { this.ghost.visible = false; this.playerFire(dt); }
     } else { this.ghost.visible = false; }
@@ -413,6 +421,42 @@ export class Game {
     const p = this.nearPick; if (!p) return; const i = this.slot === 2 ? 0 : this.slot, old = this.slots[i];
     this.dropWeapon(old.id, this.player.pos, old.ammo / old.mag); const w = this.makeWeapon(p.id); w.ammo = p.ammo; this.slots[i] = w;
     if (p.rack) p.rack.p = null; this.removePickup(p); this.selectSlot(i); this.hooks.toast(`Picked up ${w.name}`);
+  }
+  // Grenades: frag bounces on a fuse; plasma sticks to whatever it touches first.
+  throwNade(u, type, dir) {
+    if (!u.nades[type]) return false; u.nades[type]--;
+    const mesh = new THREE.Mesh(new THREE.SphereGeometry(type === 'plasma' ? 0.16 : 0.13, 8, 6), type === 'plasma' ? new THREE.MeshBasicMaterial({ color: 0x6fd0ff }) : this.m(0x3a4a2a));
+    const pos = u.pos.clone(); pos.y += EYE; pos.addScaledVector(dir, 0.6); mesh.position.copy(pos); this.scene.add(mesh);
+    this.nadesLive.push({ u, type, mesh, pos, vel: dir.clone().multiplyScalar(17).add(new THREE.Vector3(0, 3.5, 0)), fuse: type === 'plasma' ? 1.8 : 2.4, stuck: null, stuckOff: null, landed: false });
+    if (u.isPlayer) this.hooks.hud(this); return true;
+  }
+  updateNades(dt) {
+    for (const n of this.nadesLive.slice()) {
+      if (n.stuck) { if (n.stuck.alive) n.pos.copy(n.stuck.pos).add(n.stuckOff); }
+      else if (n.stuckSurf) {}
+      else {
+        n.vel.y -= GRAV * dt; const next = n.pos.clone().addScaledVector(n.vel, dt);
+        if (n.type === 'plasma') { for (const t of this.units) if (t.alive && t !== n.u && t.pos.distanceTo(next.clone().setY(next.y - 1)) < 1.0) { n.stuck = t; n.stuckOff = new THREE.Vector3(0, 1.2, 0); if (t.isPlayer) this.hooks.toast('YOU ARE STUCK!'); else if (n.u.isPlayer) this.hooks.toast('Stuck!'); break; } }
+        if (!n.stuck) {
+          const hitSolid = this.solids.find(s2 => next.x > s2.min.x && next.x < s2.max.x && next.z > s2.min.z && next.z < s2.max.z && next.y > s2.min.y && next.y < s2.max.y);
+          if (hitSolid) { if (n.type === 'plasma') n.stuckSurf = true; else { const inX = n.pos.x <= hitSolid.min.x || n.pos.x >= hitSolid.max.x; if (inX) n.vel.x *= -0.4; else n.vel.z *= -0.4; if (n.pos.y >= hitSolid.max.y) { n.vel.y *= -0.35; n.vel.x *= 0.7; n.vel.z *= 0.7; } } }
+          else if (next.y < 0.13) { if (n.type === 'plasma') { n.stuckSurf = true; n.pos.y = 0.13; } else { n.pos.y = 0.13; n.vel.y *= -0.35; n.vel.x *= 0.7; n.vel.z *= 0.7; } }
+          else n.pos.copy(next);
+        }
+      }
+      n.mesh.position.copy(n.pos); if (n.type === 'plasma') n.mesh.scale.setScalar(1 + Math.sin(n.fuse * 30) * 0.2);
+      if ((n.fuse -= dt) <= 0) { this.scene.remove(n.mesh); this.nadesLive = this.nadesLive.filter(q => q !== n); this.explode(n.pos.clone(), n.type === 'plasma' ? 140 : 115, n.type === 'plasma' ? 4.5 : 6, n.u); }
+    }
+  }
+  // Melee: quick strike, triple damage from behind.
+  melee(u) {
+    if ((u.meleeCd || 0) > 0) return; u.meleeCd = 0.8; let best = null, bd = 2.6;
+    const f = new THREE.Vector3(-Math.sin(u.yaw), 0, -Math.cos(u.yaw));
+    for (const t of this.units) if (t.alive && t.team !== u.team) { const d = t.pos.clone().sub(u.pos); const dist = d.length(); d.y = 0; d.normalize(); if (dist < bd && d.dot(f) > 0.5) { bd = dist; best = t; } }
+    if (u.isPlayer) { this.swing = 0.25; this.kick = 2; }
+    if (!best) return; const tf = new THREE.Vector3(-Math.sin(best.yaw), 0, -Math.cos(best.yaw)); const behind = tf.dot(f) > 0.5;
+    if (u.isPlayer && bd > 1.2) { const d = best.pos.clone().sub(u.pos).setY(0).normalize(); this.moveUnit(u, d.x * (bd - 1), d.z * (bd - 1), 0, false); }
+    this.hurt(best, behind ? 300 : 70, u, false); if (u.isPlayer) this.hooks.toast(behind ? 'ASSASSINATION' : 'Melee');
   }
   toggleVehicle() {
     const P = this.player;

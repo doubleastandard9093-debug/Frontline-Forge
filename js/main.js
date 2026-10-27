@@ -23,7 +23,7 @@ const hooks = {
     $('hpfill').style.width = Math.max(0, P.hp / P.maxHp * 100) + '%'; $('hptext').textContent = Math.max(0, Math.ceil(P.hp));
     $('wname').textContent = w.pick ? 'Breacher Pick' : w.name;
     $('ammo').textContent = w.pick ? '—' : w.reloading > 0 ? 'RELOAD' : `${w.ammo} / ${w.mag}`;
-    $('mats').textContent = `Wood ${g.mats.wood}  ·  Stone ${g.mats.stone}`;
+    $('mats').textContent = `Wood ${g.mats.wood} · Stone ${g.mats.stone} · ${g.nadeType === 'frag' ? '▶' : ''}Frag ${P.nades.frag} ${g.nadeType === 'plasma' ? '▶' : ''}Plasma ${P.nades.plasma}`;
     $('bmode').textContent = g.buildMode ? `BUILD: ${g.buildMode.toUpperCase()} (10 wood)` : '';
     const v = P.vehicle; if (v) { $('wname').textContent = `${v.K.name} · Armor ${Math.ceil(v.hp)}/${v.K.hp}`; $('ammo').textContent = v.K.weapons[1].ammoMax < 50 ? `${v.K.weapons[1].name} ${Math.floor(v.ammo[1])}` : v.K.weapons[1].name; }
     $('prompt').textContent = g.near ? `${matchMedia('(pointer: coarse)').matches ? 'Tap ENTER' : 'Press F'} to pilot ${g.near.K.name}` : g.nearPick ? `${matchMedia('(pointer: coarse)').matches ? 'Tap ENTER' : 'Press F'} to swap for ${GUNS[g.nearPick.id].name}` : '';
