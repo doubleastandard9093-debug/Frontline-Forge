@@ -26,7 +26,7 @@ const hooks = {
     $('mats').textContent = `Wood ${g.mats.wood}  ·  Stone ${g.mats.stone}`;
     $('bmode').textContent = g.buildMode ? `BUILD: ${g.buildMode.toUpperCase()} (10 wood)` : '';
     const v = P.vehicle; if (v) { $('wname').textContent = `${v.K.name} · Armor ${Math.ceil(v.hp)}/${v.K.hp}`; $('ammo').textContent = v.K.weapons[1].ammoMax < 50 ? `${v.K.weapons[1].name} ${Math.floor(v.ammo[1])}` : v.K.weapons[1].name; }
-    $('prompt').textContent = g.near ? `${matchMedia('(pointer: coarse)').matches ? 'Tap ENTER' : 'Press F'} to pilot ${g.near.K.name}` : '';
+    $('prompt').textContent = g.near ? `${matchMedia('(pointer: coarse)').matches ? 'Tap ENTER' : 'Press F'} to pilot ${g.near.K.name}` : g.nearPick ? `${matchMedia('(pointer: coarse)').matches ? 'Tap ENTER' : 'Press F'} to swap for ${GUNS[g.nearPick.id].name}` : '';
     $('dead').classList.toggle('hidden', P.alive);
     $('goal').textContent = `${g.map.name} · ${g.mode === 'coop' ? 'Co-op vs Bots' : g.map.mode} · first to ${g.map.scoreLimit}`;
   },

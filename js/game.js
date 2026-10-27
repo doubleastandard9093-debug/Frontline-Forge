@@ -63,6 +63,7 @@ export class Game {
     const foes = mode === 'coop' ? Math.round(this.teamSize * 1.5) : this.teamSize; // co-op: your bot squad vs a larger, sharper enemy force
     for (let i = 0; i < foes; i++) { const b = this.makeUnit(1, false, BOT_NAMES[(i + 12) % BOT_NAMES.length]); if (mode === 'coop') b.skill = Math.min(0.95, b.skill + 0.1); }
     this.units.forEach(u => this.spawn(u));
+    this.pickups = []; this.racks = (L.racks || []).map(([id, x, z]) => ({ id, x, z, t: 0 }));
     this.vehicles = []; for (const [k, x, z, team] of (L.vehicles || [])) this.vehicles.push(createVehicle(this, k, x, z, team, ++this.nextId));
     // loadout
     const lo = this.save.loadout; this.slots = [lo.primary, lo.secondary, 'pick'].map(id => id === 'pick' ? { id, pick: true } : this.makeWeapon(id));
@@ -98,7 +99,7 @@ export class Game {
     }
     this.units.push(u); return u;
   }
-  makeWeaponBot() { const ids = ['kr4', 'kr4', 'hx2', 'bm12', 'vx9']; const b = GUNS[ids[Math.floor(Math.random() * ids.length)]]; return Object.assign({ ammo: b.mag, reloading: 0, cd: 0 }, b); }
+  makeWeaponBot() { const ids = ['kr4', 'kr4', 'hx2', 'bm12', 'vx9']; const id = ids[Math.floor(Math.random() * ids.length)], b = GUNS[id]; return Object.assign({ id, ammo: b.mag, reloading: 0, cd: 0 }, b); }
   spawn(u) {
     const sp = this.layout.spawns[u.team], h = this.map.size / 2 - 3;
     for (let tries = 0; tries < 20; tries++) {
@@ -205,6 +206,7 @@ export class Game {
     if (u.isPlayer) this.hooks.hurt();
     if (!u.isPlayer && src && !u.target) u.target = src;
     if (u.hp <= 0) {
+      if (!u.isPlayer) this.dropWeapon(u.gun.id || 'kr4', u.pos, 0.6);
       u.alive = false; u.deaths++; u.respawn = 3; src.kills++; this.score[src.team]++;
       if (u.mesh) u.mesh.visible = false;
       if (src.isPlayer) { this.stats.kills++; if (head) this.stats.head++; this.hooks.toast(head ? 'HEADSHOT +150 XP' : 'Eliminated +100 XP'); }
@@ -351,7 +353,8 @@ export class Game {
     const sens = 0.0022 * (this.save.sens || 1) / (1 + (this.adsT || 0) * (w.adsZoom - 1 || 0));
     P.yaw -= input.look.x * sens; P.pitch = THREE.MathUtils.clamp(P.pitch - input.look.y * sens - this.recoilP, -1.5, 1.5);
     this.recoilP *= 0.6; P.pitch += 0; 
-    if (consume('KeyF', 'btn_enter')) this.toggleVehicle();
+    this.updatePickups(dt);
+    if (consume('KeyF', 'btn_enter')) { if (P.vehicle || this.near || !this.nearPick) this.toggleVehicle(); else this.swapWeapon(); }
     if (P.alive && P.vehicle) { this.pilot(P.vehicle, dt); }
     else if (P.alive) {
       P.spawnProt = Math.max(0, (P.spawnProt || 0) - dt);
@@ -387,6 +390,29 @@ export class Game {
     for (const tr of this.tracers) { tr.t -= dt; if (tr.t <= 0) { this.scene.remove(tr.l); tr.l.geometry.dispose(); } } this.tracers = this.tracers.filter(t => t.t > 0);
     this.hudT = (this.hudT || 0) - dt; if (this.hudT <= 0) { this.hudT = 0.2; this.hooks.hud(this); }
     if (first) input.pressed.clear();
+  }
+  // Weapon pickups: two-gun carry limit; F swaps the gun in hand for one on the ground.
+  dropWeapon(id, pos, ammoFrac = 1, rack) {
+    const L = { pistol: 0.3, smg: 0.5, rifle: 0.7, shotgun: 0.75, sniper: 1.0, lmg: 0.9 }[GUNS[id].type] || 0.6;
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.14, L), this.m(rack ? 0xe0b040 : 0x2a2c30, 'metal')); mesh.position.set(pos.x, (pos.y || 0) + 0.5, pos.z);
+    this.scene.add(mesh); const p = { id, mesh, ammo: Math.max(1, Math.round(GUNS[id].mag * ammoFrac)), life: rack ? 1e9 : 25, rack };
+    this.pickups.push(p); while (this.pickups.length > 24) this.removePickup(this.pickups.find(q => !q.rack) || this.pickups[0]); return p;
+  }
+  removePickup(p) { this.scene.remove(p.mesh); p.mesh.geometry.dispose(); this.pickups = this.pickups.filter(q => q !== p); if (p.rack) p.rack.t = 30; }
+  updatePickups(dt) {
+    for (const r of this.racks) if (!r.p && (r.t -= dt) <= 0) { r.p = this.dropWeapon(r.id, { x: r.x, z: r.z }, 1, r); }
+    const P = this.player; this.nearPick = null;
+    for (const p of this.pickups.slice()) { p.mesh.rotation.y += dt * 2; if ((p.life -= dt) <= 0) { this.removePickup(p); continue; }
+      if (!P.alive || P.vehicle) continue; const d = Math.hypot(p.mesh.position.x - P.pos.x, p.mesh.position.z - P.pos.z);
+      if (d < 1.6) { const held = this.slots.find(w => w.id === p.id); // same gun: take its ammo (refill)
+        if (held && held.ammo < held.mag) { held.ammo = held.mag; this.hooks.toast(`Ammo: ${held.name}`); if (p.rack) p.rack.p = null; this.removePickup(p); continue; }
+        if (!held && (!this.nearPick || d < this.nearPick.d)) this.nearPick = Object.assign(p, { d }); }
+    }
+  }
+  swapWeapon() {
+    const p = this.nearPick; if (!p) return; const i = this.slot === 2 ? 0 : this.slot, old = this.slots[i];
+    this.dropWeapon(old.id, this.player.pos, old.ammo / old.mag); const w = this.makeWeapon(p.id); w.ammo = p.ammo; this.slots[i] = w;
+    if (p.rack) p.rack.p = null; this.removePickup(p); this.selectSlot(i); this.hooks.toast(`Picked up ${w.name}`);
   }
   toggleVehicle() {
     const P = this.player;
