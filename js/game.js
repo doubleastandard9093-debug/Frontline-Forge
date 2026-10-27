@@ -105,7 +105,7 @@ export class Game {
     w.mag = Math.round(w.mag); w.reload *= 1 - this.save.stats.reload * 0.04; w.ammo = w.mag; w.reloading = 0; return w;
   }
   makeUnit(team, isPlayer, name) {
-    const u = { id: ++this.nextId, team, isPlayer, name, pos: new THREE.Vector3(), vy: 0, yaw: 0, pitch: 0, hp: 100, maxHp: 100, sh: 70, maxSh: 70, shT: 9, alive: true, onGround: false, kills: 0, deaths: 0, respawn: 0 };
+    const u = { id: ++this.nextId, team, isPlayer, name, pos: new THREE.Vector3(), vy: 0, yaw: 0, pitch: 0, hp: 100, maxHp: 100, sh: 100, maxSh: 100, shT: 9, alive: true, onGround: false, kills: 0, deaths: 0, respawn: 0 };
     if (!isPlayer) {
       const g = new THREE.Group(), col = team === 0 ? 0x3d6fb0 : 0xb5452f;
       const body = new THREE.Mesh(new THREE.BoxGeometry(0.7, 1.1, 0.4), this.m(col)); body.position.y = 1.05;
@@ -230,8 +230,9 @@ export class Game {
     if (u.dmgTaken) dmg *= u.dmgTaken();
     if (src?.isPlayer && u !== src) this.hooks.dmgNum(u.pos, dmg * (head && u.sh <= 0 ? 2 : 1), elem, head);
     // Recharging energy shield over health: absorbs damage first (no headshot bonus on shields), pops when depleted.
-    u.shT = 0; if (head && u.sh > 0) dmg /= 2;
-    if (u.sh > 0) { const a = Math.min(u.sh, dmg); u.sh -= a; dmg -= a; if (u.sh <= 0) this.shieldPop(u); if (head && dmg > 0) dmg *= 2; }
+    // Halo-style: the shield soaks everything; the headshot bonus only applies once the shield is already down.
+    u.shT = 0;
+    if (u.sh > 0) { const a = Math.min(u.sh, dmg); u.sh -= a; dmg -= a; if (u.sh <= 0) this.shieldPop(u); } else if (head) dmg *= 2;
     u.hp -= dmg; dmg += 0; if (src.isPlayer) { this.stats.dmg += dmg; this.hooks.hitmark(head); }
     if (u.isPlayer) this.hooks.hurt();
     if (!u.isPlayer && src && !u.target) u.target = src;
@@ -687,7 +688,7 @@ export class Game {
   }
   updateDots(dt) { for (const u of this.units) { const d = u.dot; if (!d) continue; if (!u.alive) { u.dot = null; continue; }
       d.t -= dt; d.acc += dt; if (d.acc >= 0.5) { d.acc -= 0.5; this.hurt(u, d.dps * 0.5, d.src, false, d.elem); } if (d.t <= 0) u.dot = null; } }
-  regenShields(dt) { for (const u of this.units) if (u.alive) { u.shT += dt; if (u.shT > (u.shDelay || 4) && u.sh < u.maxSh) { const was = u.sh; u.sh = Math.min(u.maxSh, u.sh + 35 * dt); if (u.isPlayer && was === 0) { this.sfx('shieldUp'); this.hooks.toast('Shield recharging'); } } } }
+  regenShields(dt) { for (const u of this.units) if (u.alive) { u.shT += dt; if (u.shT > (u.shDelay || 3) && u.sh < u.maxSh) { const was = u.sh; u.sh = Math.min(u.maxSh, u.sh + 60 * dt); if (u.isPlayer && was === 0) { this.sfx('shieldUp'); this.hooks.toast('Shield recharging'); } } } }
   hurtVehicle(v, dmg, src) {
     if (!v.alive || (src && src.team === v.team && !arguments[3])) return; v.hp -= dmg; if (src?.isPlayer) this.hooks.hitmark(false);
     if (v.seats.some(s => s.unit === this.player)) this.hooks.hurt();
@@ -731,7 +732,7 @@ export class Game {
     this.hooks.toast('Chest opened'); }
   // ---- classes ----
   applyClass() { const S = this.save, P = this.player; this.cls = CLASSES[S.cls] ? S.cls : 'vanguard'; const C = CLASSES[this.cls];
-    P.maxSh = 70 + (this.cls === 'vanguard' ? 12 * lv(S, 'ironhide') : 0); P.sh = P.maxSh; P.shDelay = 4 - (this.cls === 'vanguard' ? 0.6 * lv(S, 'secondwind') : 0);
+    P.maxSh = 100 + (this.cls === 'vanguard' ? 12 * lv(S, 'ironhide') : 0); P.sh = P.maxSh; P.shDelay = 3 - (this.cls === 'vanguard' ? 0.6 * lv(S, 'secondwind') : 0);
     P.speedMul = 1 + (this.cls === 'ghostwire' ? 0.05 * lv(S, 'quickstep') : 0);
     this.skill = { name: C.action.name, dur: C.action.dur + (this.cls === 'vanguard' ? 1.5 * lv(S, 'longwall') : this.cls === 'ghostwire' ? lv(S, 'linger') : 0), cd: C.action.cd - (this.cls === 'sparkwright' ? 4 * lv(S, 'overclock') : 0), t: 0, cdT: 0 };
     P.dmgTaken = () => this.cls === 'vanguard' && this.skill.t > 0 ? 0.4 : 1; }
