@@ -3,6 +3,8 @@ import { GUNS, ATTACH, BUILD, GRID } from './data.js';
 import { MAPS } from './maps.js';
 import { mat, makeRenderer, isPhone } from './gfx.js';
 import { Nav } from './nav.js';
+import { RARITY, ELEMENTS, genGun } from './loot.js';
+import { BACKPACK } from './save.js';
 import { KINDS, createVehicle, syncSolid } from './vehicles.js';
 import { input, pollKeys, consume, endFrame, consumeHeld } from './input.js';
 
@@ -80,6 +82,9 @@ export class Game {
     const lo = this.save.loadout; this.slots = [lo.primary, lo.secondary, 'pick'].map(id => id === 'pick' ? { id, pick: true } : this.makeWeapon(id));
     this.mats = { wood: 30, stone: 0 }; this.slot = 0; this.buildMode = null; this.buildRot = 0;
     this.stats = { kills: 0, deaths: 0, head: 0, dmg: 0, builds: 0 }; this.recoilP = 0; this.fireT = 0;
+    this.lootDrops = []; this.chests = []; this.lastLoot = null; this.dropCap = this.tier === 'low' ? (isPhone ? 10 : 16) : 30;
+    if (mode !== 'zombies') { const nC = { small: 3, large: 6, war: 9 }[M.type] || 3, hh = M.size / 2 - 6;
+      for (let i = 0, tries = 0; i < nC && tries < 200; tries++) { const p = new THREE.Vector3((Math.random() - 0.5) * hh * 2, 0, (Math.random() - 0.5) * hh * 2); if (this.blocked(p) || this.isWater(p.x, p.z) || Math.abs(p.z) > hh - 8) continue; this.addChest(p); i++; } }
     this.nav = new Nav(this); this.selectSlot(0); this.makeGhost();
     this.running = true; this.last = performance.now(); this.hooks.hud(this);
     if (!this.loopOn) { this.loopOn = true; const loop = t => { requestAnimationFrame(loop); this.frame(t); }; requestAnimationFrame(loop); }
@@ -89,8 +94,9 @@ export class Game {
     mesh.position.set(x, h / 2, z); mesh.castShadow = mesh.receiveShadow = true; mesh.userData.kind = 'static'; this.scene.add(mesh); this.hitMeshes.push(mesh);
     this.solids.push({ min: new THREE.Vector3(x - w / 2, 0, z - d / 2), max: new THREE.Vector3(x + w / 2, h, z + d / 2) });
   }
+  gunDef(id) { if (typeof id === 'string' && id[0] === 'L') return this.save.inv.find(x => 'L' + x.uid === id) || GUNS.kr4; return GUNS[id] || GUNS.kr4; }
   makeWeapon(id) {
-    const base = GUNS[id], att = this.save.attach[id] || {}; const w = Object.assign({ id }, base); w.adsZoom = base.zoom || 1.15;
+    const base = this.gunDef(id), att = base.loot ? {} : this.save.attach[id] || {}; const w = Object.assign({ id }, base); w.adsZoom = base.zoom || 1.15;
     for (const a of Object.values(att)) { const mod = ATTACH[a]?.mod || {}; for (const k in mod) w[k] = k === 'adsZoom' ? Math.max(w[k], mod[k]) : w[k] * mod[k]; }
     w.mag = Math.round(w.mag); w.reload *= 1 - this.save.stats.reload * 0.04; w.ammo = w.mag; w.reloading = 0; return w;
   }
@@ -200,8 +206,9 @@ export class Game {
   }
   damageAt(h, dmg, src, head, pick) {
     const ud = h.object.userData;
-    if (ud.kind === 'unit') this.hurt(ud.unit, dmg * (head ? 2 : 1), src, head);
-    else if (ud.kind === 'vehicle') this.hurtVehicle(ud.vehicle, dmg, src);
+    const w = src?.isPlayer ? this.slots[this.slot] : null;
+    if (ud.kind === 'unit') { if (w?.elem && ud.unit.team !== src.team && Math.random() < w.elemChance) { ud.unit.dot = { elem: w.elem, dps: w.elemDps, t: 4, acc: 0, src }; } this.hurt(ud.unit, dmg * (head ? 2 : 1), src, head); }
+    else if (ud.kind === 'vehicle') this.hurtVehicle(ud.vehicle, dmg * (w?.elem === 'corrosive' ? 1.5 : 1), src);
     else if (ud.kind === 'build') { const b = ud.build; b.hp -= dmg * (pick ? 2 : 1); b.mesh.material.opacity = 1; if (b.hp <= 0) this.removeBuild(b); }
     else if (ud.kind === 'harvest' && src.isPlayer && pick) {
       const o = ud.obj; o.userData.hp = (o.userData.hp || 120) - 30; const amt = 6 + this.save.stats.build; this.mats[ud.res] += amt;
@@ -210,9 +217,12 @@ export class Game {
       this.hooks.hud(this);
     }
   }
-  hurt(u, dmg, src, head) {
+  hurt(u, dmg, src, head, elem) {
     if (!u.alive || u.spawnProt > 0 || (src && src.team === u.team && src !== u)) return;
     if (u.vehicle) { this.hurtVehicle(u.vehicle, dmg, src); return; }
+    if (elem === 'shock' && u.sh > 0) dmg *= 2; else if (elem === 'fire' && u.sh <= 0) dmg *= 1.5;
+    if (u.dmgTaken) dmg *= u.dmgTaken();
+    if (src?.isPlayer && u !== src) this.hooks.dmgNum(u.pos, dmg * (head && u.sh <= 0 ? 2 : 1), elem, head);
     // Recharging energy shield over health: absorbs damage first (no headshot bonus on shields), pops when depleted.
     u.shT = 0; if (head && u.sh > 0) dmg /= 2;
     if (u.sh > 0) { const a = Math.min(u.sh, dmg); u.sh -= a; dmg -= a; if (u.sh <= 0) this.shieldPop(u); if (head && dmg > 0) dmg *= 2; }
@@ -220,7 +230,7 @@ export class Game {
     if (u.isPlayer) this.hooks.hurt();
     if (!u.isPlayer && src && !u.target) u.target = src;
     if (u.hp <= 0) {
-      if (!u.isPlayer) this.dropWeapon(u.gun.id || 'kr4', u.pos, 0.6);
+      if (!u.isPlayer) { if (u.team !== this.player.team && Math.random() < (this.mode === 'zombies' ? 0.04 : 0.3)) this.dropLoot(genGun(this.save.rank + 1), u.pos); else if (this.mode !== 'zombies') this.dropWeapon(u.gun.id || 'kr4', u.pos, 0.6); }
       u.alive = false; u.deaths++; u.respawn = 3; src.kills++; this.score[src.team]++;
       if (u.mesh) u.mesh.visible = false;
       if (src.isPlayer) { this.stats.kills++; if (head) this.stats.head++; this.hooks.toast(head ? 'HEADSHOT +150 XP' : 'Eliminated +100 XP'); }
@@ -331,7 +341,7 @@ export class Game {
       }
       if (Math.random() < 0.3) u.strafe *= -1;
     }
-    let mx = 0, mz = 0, jump = false; const speed = 4.2;
+    let mx = 0, mz = 0, jump = false; const speed = (u.speed || 4.2) * (u.dot?.elem === 'cryo' ? 0.5 : 1);
     if (u.target && u.target.alive) {
       const t = u.target, d = t.pos.clone().sub(u.pos); u.yaw = Math.atan2(-d.x, -d.z); u.seeT += dt;
       const dist = d.length(), side = new THREE.Vector3(Math.cos(u.yaw), 0, -Math.sin(u.yaw));
@@ -403,7 +413,7 @@ export class Game {
     this.recoilP *= 0.6; P.pitch += 0; 
     if (consume('KeyM', 'btn_map')) { this.overview = !this.overview; this.hooks.maps(this, this.overview); }
     this.updatePickups(dt); this.updateNades(dt); for (const u of this.units) u.meleeCd = (u.meleeCd || 0) - dt;
-    if (consume('KeyF', 'btn_enter')) { if (P.vehicle || this.near || !this.nearPick) this.toggleVehicle(); else this.swapWeapon(); }
+    if (consume('KeyF', 'btn_enter')) { if (this.interact?.()) {} else if (!P.vehicle && !this.near && this.nearChest) this.openChest(this.nearChest); else if (!P.vehicle && !this.near && !this.nearPick && this.lastLoot && this.lastLoot.t > 0) this.equipLoot(this.lastLoot.uid); else if (P.vehicle || this.near || !this.nearPick) this.toggleVehicle(); else this.swapWeapon(); }
     if (P.alive && P.vehicle) { this.buildMode = null; this.pilot(P.vehicle, dt); }
     else if (P.alive) {
       P.spawnProt = Math.max(0, (P.spawnProt || 0) - dt);
@@ -435,7 +445,7 @@ export class Game {
     const lod = this.tier === 'low' ? 85 : 160; for (const u of this.units) if (u.mesh && u.alive) u.mesh.visible = !u.vehicle && u.pos.distanceTo(P.pos) < lod;
     for (const v of this.vehicles) if (v.alive) v.mesh.visible = v.pos.distanceTo(P.pos) < lod * 2.2;
     this.updateCaps(dt);
-    this.regenShields(dt);
+    this.updateDots(dt); this.regenShields(dt); this.updateLoot(dt);
     // bots & respawns
     for (const u of this.units) {
       if (!u.alive) { u.respawn -= dt; if (u.respawn <= 0 && !this.over) {
@@ -452,9 +462,9 @@ export class Game {
   }
   // Weapon pickups: two-gun carry limit; F swaps the gun in hand for one on the ground.
   dropWeapon(id, pos, ammoFrac = 1, rack) {
-    const L = { pistol: 0.3, smg: 0.5, rifle: 0.7, shotgun: 0.75, sniper: 1.0, lmg: 0.9 }[GUNS[id].type] || 0.6;
+    const L = { pistol: 0.3, smg: 0.5, rifle: 0.7, shotgun: 0.75, sniper: 1.0, lmg: 0.9 }[this.gunDef(id).type] || 0.6;
     const mesh = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.14, L), this.m(rack ? 0xe0b040 : 0x2a2c30, 'metal')); mesh.position.set(pos.x, (pos.y || 0) + 0.5, pos.z);
-    this.scene.add(mesh); const p = { id, mesh, ammo: Math.max(1, Math.round(GUNS[id].mag * ammoFrac)), life: rack ? 1e9 : 25, rack };
+    this.scene.add(mesh); const p = { id, mesh, ammo: Math.max(1, Math.round(this.gunDef(id).mag * ammoFrac)), life: rack ? 1e9 : 25, rack };
     this.pickups.push(p); while (this.pickups.length > 24) this.removePickup(this.pickups.find(q => !q.rack) || this.pickups[0]); return p;
   }
   removePickup(p) { this.scene.remove(p.mesh); p.mesh.geometry.dispose(); this.pickups = this.pickups.filter(q => q !== p); if (p.rack) p.rack.t = 30; }
@@ -663,6 +673,8 @@ export class Game {
     const fx = new THREE.Mesh(new THREE.SphereGeometry(1.1, 10, 8), new THREE.MeshBasicMaterial({ color: 0x7fd8ff, transparent: true, opacity: 0.55, depthWrite: false }));
     fx.position.copy(u.pos); fx.position.y += 1.1; this.scene.add(fx); let t = 0; const step = () => { t += 0.05; fx.scale.setScalar(1 + t * 2); fx.material.opacity = 0.55 * (1 - t / 0.3); if (t < 0.3 && this.scene) requestAnimationFrame(step); else this.scene?.remove(fx); }; step();
   }
+  updateDots(dt) { for (const u of this.units) { const d = u.dot; if (!d) continue; if (!u.alive) { u.dot = null; continue; }
+      d.t -= dt; d.acc += dt; if (d.acc >= 0.5) { d.acc -= 0.5; this.hurt(u, d.dps * 0.5, d.src, false, d.elem); } if (d.t <= 0) u.dot = null; } }
   regenShields(dt) { for (const u of this.units) if (u.alive) { u.shT += dt; if (u.shT > 4 && u.sh < u.maxSh) { const was = u.sh; u.sh = Math.min(u.maxSh, u.sh + 35 * dt); if (u.isPlayer && was === 0) { this.sfx('shieldUp'); this.hooks.toast('Shield recharging'); } } } }
   hurtVehicle(v, dmg, src) {
     if (!v.alive || (src && src.team === v.team && !arguments[3])) return; v.hp -= dmg; if (src?.isPlayer) this.hooks.hitmark(false);
@@ -678,6 +690,33 @@ export class Game {
       units: this.units.map(u => ({ id: u.id, team: u.team, x: u.pos.x, y: u.pos.y, z: u.pos.z, yaw: u.yaw, hp: u.hp, alive: u.alive })),
       builds: this.builds.map(b => ({ id: b.id, ...b.g, hp: b.hp })) };
   }
+  // ---- loot ----
+  lootMat(ri) { this.lootMats = this.lootMats || {}; return this.lootMats[ri] || (this.lootMats[ri] = new THREE.MeshBasicMaterial({ color: RARITY[ri].color, transparent: true, opacity: 0.55, depthWrite: false })); }
+  dropLoot(gun, pos) {
+    const g = new THREE.Group(); const L = { pistol: 0.3, smg: 0.5, rifle: 0.7, shotgun: 0.75, sniper: 1.0 }[gun.type] || 0.6;
+    const body = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.14, L), this.m(RARITY[gun.rarity].color)); body.position.y = 0.5; g.add(body);
+    const bh = (this.tier === 'low' ? 1.6 : 2.5) + gun.rarity * (this.tier === 'low' ? 0.8 : 1.4); // rarity beam
+    const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.05 + gun.rarity * 0.015, 0.05 + gun.rarity * 0.015, bh, 5, 1, true), this.lootMat(gun.rarity)); beam.position.y = bh / 2; g.add(beam);
+    g.position.set(pos.x + (Math.random() - 0.5), Math.max(0, (pos.y || 0) - 0), pos.z + (Math.random() - 0.5)); this.scene.add(g);
+    this.lootDrops.push({ gun, mesh: g, life: 90 }); while (this.lootDrops.length > this.dropCap) this.removeLoot(this.lootDrops.sort((a, b) => a.gun.rarity - b.gun.rarity)[0]);
+  }
+  removeLoot(d) { this.scene.remove(d.mesh); d.mesh.traverse(o => o.isMesh && o.geometry.dispose()); this.lootDrops = this.lootDrops.filter(x => x !== d); }
+  updateLoot(dt) {
+    const P = this.player; if (this.lastLoot) this.lastLoot.t -= dt;
+    for (const d of this.lootDrops.slice()) { d.mesh.children[0].rotation.y += dt * 2; if ((d.life -= dt) <= 0) { this.removeLoot(d); continue; }
+      if (P.alive && !P.vehicle && Math.hypot(d.mesh.position.x - P.pos.x, d.mesh.position.z - P.pos.z) < 1.5) {
+        if (this.save.inv.length >= BACKPACK) { if (!d.warned) { d.warned = true; this.hooks.toast('Backpack full: sell guns in the Armory'); } continue; }
+        const gun = Object.assign({ uid: this.save.uid++ }, d.gun); this.save.inv.push(gun); this.hooks.persist(); this.removeLoot(d); this.sfx('capture');
+        this.lastLoot = { uid: gun.uid, t: 8 }; this.hooks.toast(`<span style="color:${RARITY[gun.rarity].css}">${RARITY[gun.rarity].name} ${gun.name}</span>${gun.elem ? ' · ' + ELEMENTS[gun.elem].name : ''} added to backpack (F / ENTER to equip now)`, true); } }
+    this.nearChest = null; if (P.alive && !P.vehicle) for (const c of this.chests) if (!c.open && Math.hypot(c.x - P.pos.x, c.z - P.pos.z) < 2.6) { this.nearChest = c; break; }
+  }
+  equipLoot(uid) { const gun = this.save.inv.find(x => x.uid === uid); if (!gun) return; const i = gun.type === 'pistol' ? 1 : 0; this.slots[i] = this.makeWeapon('L' + uid); this.save.loadout[i ? 'secondary' : 'primary'] = 'L' + uid; this.hooks.persist(); this.lastLoot = null; this.selectSlot(i); this.hooks.toast(`Equipped ${gun.name}`); }
+  addChest(p) { const g = new THREE.Group(); const base = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.7, 0.8), this.m(0x5b3d1e, 'wood')); base.position.y = 0.35;
+    const lid = new THREE.Mesh(new THREE.BoxGeometry(1.45, 0.2, 0.85), this.m(0xd4a63a, 'metal')); lid.position.y = 0.8; g.add(base, lid); g.position.copy(p); this.scene.add(g);
+    this.chests.push({ x: p.x, z: p.z, mesh: g, lid, open: false }); this.solids.push({ min: new THREE.Vector3(p.x - 0.7, 0, p.z - 0.4), max: new THREE.Vector3(p.x + 0.7, 0.9, p.z + 0.4) }); }
+  openChest(c) { c.open = true; c.lid.rotation.x = -1.2; c.lid.position.set(0, 1.0, 0.35); this.sfx('capture'); const n = 2 + (Math.random() < 0.3 ? 1 : 0);
+    for (let i = 0; i < n; i++) { const g = genGun(this.save.rank + 2); if (g.rarity === 0 && Math.random() < 0.6) Object.assign(g, genGun(this.save.rank + 2, 1)); this.dropLoot(g, { x: c.x, y: 0, z: c.z + 1.2 }); }
+    this.hooks.toast('Chest opened'); }
   end() {
     if (this.over) return; this.over = true; this.running = false; document.exitPointerLock?.();
     const won = this.score[0] > this.score[1], s = this.stats, big = this.map.type === 'war' ? 1.6 : this.map.type === 'large' ? 1.3 : 1;

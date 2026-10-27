@@ -5,6 +5,8 @@ import { pickTier } from './gfx.js';
 import { initInput, gyro, enableGyro, gyroSupported, setGyroActive } from './input.js';
 import { Game } from './game.js';
 import { Sfx } from './audio.js';
+import { RARITY, ELEMENTS, sellValue, gunLine } from './loot.js';
+import { BACKPACK } from './save.js';
 
 const $ = id => document.getElementById(id);
 let S = load(); const tier = pickTier(S);
@@ -17,7 +19,7 @@ function show(id) { screens.forEach(s => $(s).classList.toggle('hidden', s !== i
 document.querySelectorAll('[data-go]').forEach(b => b.onclick = () => { if (b.dataset.go === 'menu' && game) { game.dispose(); } show(b.dataset.go); });
 if (matchMedia('(pointer: coarse)').matches) document.body.classList.add('touch');
 
-const toastEl = $('toast'); let toastT;
+const toastEl = $('toast'); let toastT, dmgLive = 0;
 const hooks = {
   hud(g) {
     $('gyroHint').classList.toggle('hidden', !(gyro.on && gyro.active && gyro.portrait));
@@ -34,7 +36,7 @@ const hooks = {
       if (v.K.mode === 'jet' || v.K.mode === 'heli') $('ammo').textContent += ` · ALT ${Math.round(v.pos.y)}m${v.K.mode === 'jet' ? ` · ${Math.round(v.speed * 3.6)} km/h` : ''}`;
       $('wname').classList.toggle('warn', v.hp < v.K.hp * 0.3); if (v.hp < v.K.hp * 0.3) $('wname').textContent += ' · ARMOR CRITICAL'; }
     $('caps').innerHTML = g.capPoints.map(c => `<span class="cap o${c.owner}">${c.n}</span>`).join('');
-    $('prompt').textContent = g.near ? `${matchMedia('(pointer: coarse)').matches ? 'Tap ENTER' : 'Press F'} to pilot ${g.near.K.name}` : g.nearPick ? `${matchMedia('(pointer: coarse)').matches ? 'Tap ENTER' : 'Press F'} to swap for ${GUNS[g.nearPick.id].name}` : '';
+    $('prompt').textContent = g.near ? `${matchMedia('(pointer: coarse)').matches ? 'Tap ENTER' : 'Press F'} to pilot ${g.near.K.name}` : g.nearPick ? `${matchMedia('(pointer: coarse)').matches ? 'Tap ENTER' : 'Press F'} to swap for ${GUNS[g.nearPick.id].name}` : g.nearChest ? `${matchMedia('(pointer: coarse)').matches ? 'Tap ENTER' : 'Press F'} to open chest` : (g.zPrompt || '');
     $('dead').classList.toggle('hidden', P.alive);
     $('goal').textContent = `${g.map.name} · ${g.mode === 'coop' ? 'Co-op vs Bots' : g.map.mode}${g.capPoints.length ? ' (hold points)' : ''} · first to ${g.map.scoreLimit}`;
   },
@@ -55,7 +57,12 @@ const hooks = {
   maps(g, showOverview) {
     drawMap(g, $('minimap'), false); const ov = $('overview'); ov.classList.toggle('hidden', !showOverview); if (showOverview) drawMap(g, ov, true);
   },
-  toast(m) { toastEl.textContent = m; clearTimeout(toastT); toastT = setTimeout(() => toastEl.textContent = '', 1200); },
+  toast(m, html) { if (html) toastEl.innerHTML = m; else toastEl.textContent = m; clearTimeout(toastT); toastT = setTimeout(() => toastEl.textContent = '', html ? 3000 : 1200); },
+  persist() { save(S); },
+  dmgNum(pos, n, elem, head) { // floating damage numbers, pooled and capped (fewer on Low)
+    if (dmgLive >= (tier === 'low' ? 10 : 24) || !game) return; const v = pos.clone(); v.y += 2.1 + Math.random() * 0.3; v.x += (Math.random() - 0.5) * 0.6; v.project(game.camera); if (v.z > 1) return;
+    const d = document.createElement('div'); d.className = 'dmgn' + (head ? ' crit' : ''); d.textContent = Math.max(1, Math.round(n)); d.style.color = elem ? ELEMENTS[elem].css : head ? '#ffd23a' : '#fff';
+    d.style.left = ((v.x + 1) / 2 * innerWidth) + 'px'; d.style.top = ((1 - v.y) / 2 * innerHeight) + 'px'; document.body.appendChild(d); dmgLive++; setTimeout(() => { d.remove(); dmgLive--; }, 750); },
   hitmark(head) { sfx.play(head ? 'head' : 'hit'); const h = $('hitm'); h.classList.toggle('head', head); h.style.opacity = 1; setTimeout(() => h.style.opacity = 0, 120); },
   shieldPop() { const h = $('pop'); h.classList.remove('go'); void h.offsetWidth; h.classList.add('go'); },
   hurt() { const h = $('hurt'); h.style.opacity = 1; setTimeout(() => h.style.opacity = 0, 200); },
@@ -140,6 +147,14 @@ function render(id) {
 }
 function renderShop() {
   $('gp').innerHTML = rankHtml();
+  const eqName = id => id[0] === 'L' ? (S.inv.find(x => 'L' + x.uid === id)?.name || '?') : GUNS[id]?.name;
+  $('backpack').innerHTML = `<h3>Backpack ${S.inv.length}/${BACKPACK}</h3><p class="note">Loot drops from enemies and chests. Equipped: ${eqName(S.loadout.primary)} / ${eqName(S.loadout.secondary)}</p>` + (S.inv.length ? '' : '<p class="note">Empty. Kill enemies and open chests to find loot guns.</p>') +
+    S.inv.slice().sort((a, b) => b.rarity - a.rarity).map(g => { const id = 'L' + g.uid, slot = g.type === 'pistol' ? 'secondary' : 'primary', eq = S.loadout[slot] === id;
+      return `<div class="item loot" style="border-left:4px solid ${RARITY[g.rarity].css}"><div class="nm"><b style="color:${RARITY[g.rarity].css}">${g.name}</b> <small>${RARITY[g.rarity].name} · Lv ${g.lvl} · ${gunLine(g)}</small></div>
+      <button data-leq="${id}" class="${eq ? 'on' : ''}">${eq ? 'Equipped' : 'Equip ' + slot}</button><button data-sell="${g.uid}" class="danger">Sell ${sellValue(g)} GP</button></div>`; }).join('');
+  document.querySelectorAll('[data-leq]').forEach(b => b.onclick = () => { const g = S.inv.find(x => 'L' + x.uid === b.dataset.leq); S.loadout[g.type === 'pistol' ? 'secondary' : 'primary'] = b.dataset.leq; save(S); renderShop(); });
+  document.querySelectorAll('[data-sell]').forEach(b => b.onclick = () => { const uid = +b.dataset.sell, g = S.inv.find(x => x.uid === uid); S.gp += sellValue(g); S.inv = S.inv.filter(x => x !== g);
+    if (S.loadout.primary === 'L' + uid) S.loadout.primary = 'kr4'; if (S.loadout.secondary === 'L' + uid) S.loadout.secondary = 'vx9'; save(S); renderShop(); });
   $('shop').innerHTML = Object.entries(GUNS).map(([id, g]) => {
     const own = S.owned.includes(id), lock = S.rank < g.rank, slot = g.type === 'pistol' ? 'secondary' : 'primary', eq = S.loadout[slot] === id;
     const att = own ? `<div class="att">${Object.entries(ATTACH).map(([a, A]) => { const has = S.ownedAttach.includes(a), on = (S.attach[id] || {})[A.slot] === a, lk = S.rank < A.rank;
