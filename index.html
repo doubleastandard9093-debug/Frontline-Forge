@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Frontline Forge">
+<meta name="theme-color" content="#1b2028">
+<title>Frontline Forge</title>
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon.svg">
+<link rel="icon" href="icon.svg">
+<link rel="stylesheet" href="css/style.css">
+<script type="importmap">{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js" } }</script>
+</head>
+<body>
+<canvas id="game"></canvas>
+
+<div id="hud" class="hidden">
+  <div id="cross"><i></i><i></i><i></i><i></i></div>
+  <div id="hitm"></div>
+  <div id="scope" class="hidden"></div>
+  <div id="hurt"></div>
+  <div id="top"><span id="sc0" class="blue">0</span><span id="timer">0:00</span><span id="sc1" class="red">0</span></div>
+  <div id="goal"></div>
+  <div id="feed"></div>
+  <div id="toast"></div>
+  <div id="bl"><div id="hpbar"><div id="hpfill"></div></div><div id="hptext">100</div><div id="rankline"></div></div>
+  <div id="br"><div id="wname"></div><div id="ammo"></div><div id="mats"></div><div id="bmode"></div></div>
+  <div id="board" class="hidden"></div>
+  <div id="dead" class="hidden">Respawning…</div>
+  <div id="stick"><div id="knob"></div></div>
+  <div id="tbtns">
+    <button data-btn="fire" class="b-fire">FIRE</button>
+    <button data-btn="ads" class="b-ads">AIM</button>
+    <button data-btn="jump" class="b-jump">JUMP</button>
+    <button data-btn="reload" class="b-reload">R</button>
+    <button data-btn="weapon" class="b-weapon">WPN</button>
+    <button data-btn="build" class="b-build">BUILD</button>
+    <button data-btn="edit" class="b-edit">EDIT</button>
+    <button data-btn="menu" class="b-menu">II</button>
+  </div>
+</div>
+
+<div id="menu" class="screen">
+  <h1>FRONTLINE <b>FORGE</b></h1>
+  <div id="profile"></div>
+  <div class="col">
+    <button class="big" data-go="play">Play</button>
+    <button data-go="armory">Armory &amp; Shop</button>
+    <button data-go="stats">Soldier Stats</button>
+    <button data-go="settings">Settings</button>
+    <button class="soon" disabled>Multiplayer <small>coming soon</small></button>
+  </div>
+</div>
+
+<div id="play" class="screen hidden">
+  <h2>Choose mode</h2>
+  <div class="row" id="modes">
+    <button data-mode="tdm" class="on">Team Deathmatch<small>Your bot squad vs enemy bots</small></button>
+    <button data-mode="coop">Co-op vs Bots<small>Bot teammates fill player slots. Bigger, sharper enemy force</small></button>
+  </div>
+  <h2>Choose map</h2>
+  <div class="row" id="maps"></div>
+  <button data-go="menu">Back</button>
+</div>
+
+<div id="armory" class="screen hidden"><h2>Armory</h2><div id="gp"></div><div id="shop"></div><button data-go="menu">Back</button></div>
+<div id="stats" class="screen hidden"><h2>Soldier Stats</h2><div id="statlist"></div><button data-go="menu">Back</button></div>
+<div id="settings" class="screen hidden">
+  <h2>Settings</h2>
+  <div class="row"><span>Graphics</span><button id="gLow">Low</button><button id="gHigh">High</button></div>
+  <p class="note">Low is lighter and best for phones. Changing it reloads the game.</p>
+  <div class="row"><span>Look sensitivity</span><input id="sens" type="range" min="0.3" max="2.5" step="0.1"></div>
+  <h3>Save</h3>
+  <div class="row"><button id="exp">Export save</button><button id="imp">Import save</button><button id="wipe" class="danger">Reset</button></div>
+  <textarea id="code" placeholder="Save code appears here, or paste one to import"></textarea>
+  <h3>Controls</h3>
+  <p class="note">PC: WASD move, mouse aim (click to lock), Left click fire/place, Right click aim, R reload, Space jump, Shift sprint, 1/2 guns, 3 or V pickaxe, Z wall, X floor, C ramp, Q build on/off, E edit, Tab scores, Esc pause.<br>
+  Phone: left thumb moves, drag right side to look, FIRE (drag to aim while firing), AIM, JUMP, R, WPN cycles guns/pickaxe, BUILD cycles wall/floor/ramp/off, EDIT.</p>
+  <button data-go="menu">Back</button>
+</div>
+<div id="pause" class="screen hidden"><h2>Paused</h2><div class="col"><button id="resume" class="big">Resume</button><button id="quit">Leave match</button></div></div>
+<div id="results" class="screen hidden"><h2 id="rtitle"></h2><div id="rbody"></div><button data-go="menu" class="big">Continue</button></div>
+
+<script type="module" src="js/main.js"></script>
+</body>
+</html>
