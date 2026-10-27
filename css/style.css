@@ -48,5 +48,5 @@ body.touch #bl{bottom:calc(190px + var(--sb))}body.touch #br{bottom:auto;top:cal
 #visor{position:absolute;inset:0;pointer-events:none;background:radial-gradient(ellipse 120% 100% at 50% 50%,transparent 70%,rgba(40,120,170,.18) 88%,rgba(10,40,60,.45) 100%)}
 #visor:before{content:"";position:absolute;left:30%;right:30%;top:calc(2px + var(--st));height:30px;border-bottom:2px solid rgba(127,216,255,.35);border-radius:0 0 40px 40px}
 #tracker{position:absolute;left:calc(14px + var(--sl));bottom:calc(80px + var(--sb));width:150px;height:150px}
-body.touch #tracker{left:auto;right:calc(10px + var(--sr));top:calc(130px + var(--st));bottom:auto;width:110px;height:110px}
+body.touch #tracker{left:calc(10px + var(--sl));top:calc(64px + var(--st));bottom:auto;width:110px;height:110px}
 #bl #shbar,#bl #hpbar{width:240px}
