@@ -26,3 +26,14 @@ Hold the phone sideways (either way round): turn your body or tilt it like a ste
 - **Loot:** affixes, maker gimmicks (Torvik ricochet, Brakka throw, Nimbus homing), red-text legendaries, rank requirements.
 - **Vehicle counterplay:** Skyhook LL-9 lock-on launcher (hold on a vehicle 1.2 s), EMP grenade (T to cycle; stalls vehicles 3 s, strips shields), Sparkwright pickaxe repairs friendly vehicles, F next to an enemy ground vehicle hijacks it, per-type respawn timers (buggy 20 s … tank/jet 60 s).
 - **Bot difficulty:** pick Recruit / Regular / Veteran / Legend on the Play screen (reaction time, aim, grenade and vehicle use).
+
+## Realism pack (High only)
+`js/hifi.js` is imported **only** when graphics are set to High, so Low never downloads or builds any of it (Low stays Lambert-only: no textures, no shadows).
+- **Characters:** armored soldiers with PBR armor/fabric/metal, clearcoat plates, reflective visor, backpack and pouches, a jointed rig (hips, knees, shoulders, elbows) with a speed-driven walk cycle. Zombies reuse the rig with the armor stripped.
+- **Buildings:** world-scaled PBR concrete/metal/wood with normal + roughness maps, roof coping, plinths, corner posts, grime streaks and hazard-sign decals.
+- **Vehicles:** clearcoat PBR paint and reflective bare metal (environment lighting fixes the old dark metal), extra detail (road wheels, lights, pods, antennas, muzzle brake), smoke below 60% HP, fire and scorched paint below 30%.
+- **Environment:** noise-blended terrain (grass, dry grass, dirt, gravel) with detail normals, wind-animated grass blades, layered conifers with bark, bushes, PBR rocks, gradient sky dome with sun, exponential fog, reflective scrolling water, crisp shadows that follow the player, ACES tone mapping.
+- **Phones on High:** smaller textures (256 px), fewer grass blades and particles, 1024 shadow map, no grime decals.
+
+### Credits
+All realism textures, models and effects are self-made: generated procedurally in code at runtime (`js/hifi.js`) by the Frontline Forge project. No third-party art assets are used. Engine: three.js (MIT).
