@@ -7,6 +7,7 @@ import { Game } from './game.js';
 import { Sfx } from './audio.js';
 import { RARITY, ELEMENTS, sellValue, gunLine } from './loot.js';
 import { BACKPACK } from './save.js';
+import { CLASSES, skillPts, lv } from './classes.js';
 
 const $ = id => document.getElementById(id);
 let S = load(); const tier = pickTier(S);
@@ -14,7 +15,7 @@ const sfx = new Sfx(tier, S.vol ?? 0.7); window.__sfx = sfx;
 for (const ev of ['pointerdown', 'keydown', 'touchstart']) addEventListener(ev, () => sfx.unlock(), { capture: true, passive: true });
 document.addEventListener('click', e => { if (e.target.closest('button')) sfx.play('ui'); });
 const canvas = $('game'); let mode = 'tdm', game;
-const screens = ['menu', 'play', 'armory', 'stats', 'settings', 'pause', 'results'];
+const screens = ['menu', 'play', 'armory', 'stats', 'classes', 'settings', 'pause', 'results'];
 function show(id) { screens.forEach(s => $(s).classList.toggle('hidden', s !== id)); $('hud').classList.toggle('hidden', id !== null); render(id); }
 document.querySelectorAll('[data-go]').forEach(b => b.onclick = () => { if (b.dataset.go === 'menu' && game) { game.dispose(); } show(b.dataset.go); });
 if (matchMedia('(pointer: coarse)').matches) document.body.classList.add('touch');
@@ -31,6 +32,8 @@ const hooks = {
     $('wname').textContent = w.pick ? 'Breacher Pick' : w.name;
     $('ammo').textContent = w.pick ? '—' : w.reloading > 0 ? 'RELOAD' : `${w.ammo} / ${w.mag}`;
     $('mats').textContent = `Wood ${g.mats.wood} · Stone ${g.mats.stone} · ${g.nadeType === 'frag' ? '▶' : ''}Frag ${P.nades.frag} ${g.nadeType === 'plasma' ? '▶' : ''}Plasma ${P.nades.plasma}`;
+    if (g.skill) { const k = g.skill; $('skill').textContent = `[${matchMedia('(pointer: coarse)').matches ? 'SKILL' : 'H'}] ${k.name}: ${k.t > 0 ? 'ACTIVE ' + Math.ceil(k.t) + 's' : k.cdT > 0 ? Math.ceil(k.cdT) + 's' : 'READY'}`; $('skill').classList.toggle('ready', !k.cdT); }
+    document.body.classList.toggle('cloaked', g.player.cloakT > 0);
     $('bmode').textContent = g.buildMode ? `BUILD: ${g.buildMode.toUpperCase()} (10 wood)` : '';
     const v = P.vehicle; if (v) { $('wname').textContent = `${v.K.name} · Armor ${Math.ceil(v.hp)}/${v.K.hp}`; const seat = v.seats.find(s => s.unit === P), w1 = v.K.weapons[1]; $('ammo').textContent = seat.role === 'driver' && v.K.mode === 'car' ? `${Math.round(Math.abs(v.speed) * 3.6)} km/h` : w1 ? (w1.ammoMax < 50 ? `${w1.name} ${Math.floor(v.ammo[1])}` : w1.name) : v.K.weapons[0].name;
       if (v.K.mode === 'jet' || v.K.mode === 'heli') $('ammo').textContent += ` · ALT ${Math.round(v.pos.y)}m${v.K.mode === 'jet' ? ` · ${Math.round(v.speed * 3.6)} km/h` : ''}`;
@@ -141,6 +144,7 @@ function render(id) {
   }
   if (id === 'armory') renderShop();
   if (id === 'stats') renderStats();
+  if (id === 'classes') renderClasses();
   if (id === 'settings') {
     $('gLow').classList.toggle('on', tier === 'low'); $('gHigh').classList.toggle('on', tier === 'high'); $('sens').value = S.sens || 1; $('vol').value = S.vol ?? 0.7; renderGyro();
   }
@@ -167,6 +171,17 @@ function renderShop() {
   document.querySelectorAll('[data-att]').forEach(b => b.onclick = () => { const [id, a] = b.dataset.att.split(':'), A = ATTACH[a]; if (S.rank < A.rank) return;
     if (!S.ownedAttach.includes(a)) { if (S.gp < A.price) return alert('Not enough GP'); S.gp -= A.price; S.ownedAttach.push(a); }
     const cur = S.attach[id] || (S.attach[id] = {}); cur[A.slot] = cur[A.slot] === a ? undefined : a; save(S); renderShop(); });
+}
+function renderClasses() {
+  const pts = skillPts(S);
+  $('classlist').innerHTML = `<p>${rankHtml()}</p><p>Skill points: <b>${pts}</b> (1 per rank). Switching class refunds nothing and keeps points per skill.</p>` + Object.entries(CLASSES).map(([k, C]) =>
+    `<div class="item cls ${S.cls === k ? 'on' : ''}" style="border-left:4px solid ${C.color}"><div class="nm"><b style="color:${C.color}">${C.name}</b> <small>${C.role} · Action skill (H / SKILL): <b>${C.action.name}</b> — ${C.action.desc}, ${C.action.dur}s, ${C.action.cd}s cooldown</small>
+      ${S.cls === k ? Object.entries(C.skills).map(([sk, X]) => `<div class="row"><span>${X.name} ${lv(S, sk)}/${X.max} <small>${X.desc} per point</small></span><button data-sk="${sk}" ${pts > 0 && lv(S, sk) < X.max ? '' : 'disabled'}>+1</button></div>`).join('') : ''}</div>
+      <button data-cls="${k}" class="${S.cls === k ? 'on' : ''}">${S.cls === k ? 'Selected' : 'Select'}</button></div>`).join('') +
+    `<button id="respec" class="danger">Reset skill points (100 GP)</button>`;
+  document.querySelectorAll('[data-cls]').forEach(b => b.onclick = () => { S.cls = b.dataset.cls; save(S); renderClasses(); });
+  document.querySelectorAll('[data-sk]').forEach(b => b.onclick = () => { S.skills[b.dataset.sk] = lv(S, b.dataset.sk) + 1; save(S); renderClasses(); });
+  $('respec').onclick = () => { if (S.gp < 100) return alert('Not enough GP'); S.gp -= 100; S.skills = {}; save(S); renderClasses(); };
 }
 function renderStats() {
   $('statlist').innerHTML = `<p>${rankHtml()}</p><p>Unspent points: <b>${S.points}</b> (1 per rank up)</p>` + Object.entries(STATS).map(([k, s]) =>

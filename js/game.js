@@ -5,6 +5,7 @@ import { mat, makeRenderer, isPhone } from './gfx.js';
 import { Nav } from './nav.js';
 import { RARITY, ELEMENTS, genGun } from './loot.js';
 import { BACKPACK } from './save.js';
+import { CLASSES, lv } from './classes.js';
 import { KINDS, createVehicle, syncSolid } from './vehicles.js';
 import { input, pollKeys, consume, endFrame, consumeHeld } from './input.js';
 
@@ -85,6 +86,7 @@ export class Game {
     this.lootDrops = []; this.chests = []; this.lastLoot = null; this.dropCap = this.tier === 'low' ? (isPhone ? 10 : 16) : 30;
     if (mode !== 'zombies') { const nC = { small: 3, large: 6, war: 9 }[M.type] || 3, hh = M.size / 2 - 6;
       for (let i = 0, tries = 0; i < nC && tries < 200; tries++) { const p = new THREE.Vector3((Math.random() - 0.5) * hh * 2, 0, (Math.random() - 0.5) * hh * 2); if (this.blocked(p) || this.isWater(p.x, p.z) || Math.abs(p.z) > hh - 8) continue; this.addChest(p); i++; } }
+    this.applyClass(); this.turrets = [];
     this.nav = new Nav(this); this.selectSlot(0); this.makeGhost();
     this.running = true; this.last = performance.now(); this.hooks.hud(this);
     if (!this.loopOn) { this.loopOn = true; const loop = t => { requestAnimationFrame(loop); this.frame(t); }; requestAnimationFrame(loop); }
@@ -207,7 +209,8 @@ export class Game {
   damageAt(h, dmg, src, head, pick) {
     const ud = h.object.userData;
     const w = src?.isPlayer ? this.slots[this.slot] : null;
-    if (ud.kind === 'unit') { if (w?.elem && ud.unit.team !== src.team && Math.random() < w.elemChance) { ud.unit.dot = { elem: w.elem, dps: w.elemDps, t: 4, acc: 0, src }; } this.hurt(ud.unit, dmg * (head ? 2 : 1), src, head); }
+    if (ud.kind === 'unit') { const ch = this.cls === 'sparkwright' ? 0.06 * lv(this.save, 'charged') : 0, el = w?.elem || (ch && !w?.pick ? 'shock' : null);
+    if (w && el && ud.unit.team !== src.team && Math.random() < (w.elem ? w.elemChance : 0) + ch) { ud.unit.dot = { elem: el, dps: w.elemDps || Math.round(w.dmg * 0.5), t: 4, acc: 0, src }; } const P = this.player, bonus = src === P ? (head ? 1 + 0.12 * lv(this.save, 'deadeye') * (this.cls === 'ghostwire') : 1) * (P.cloakShot ? 3 : 1) : 1; if (src === P) P.cloakShot = false; this.hurt(ud.unit, dmg * (head ? 2 : 1) * bonus, src, head); }
     else if (ud.kind === 'vehicle') this.hurtVehicle(ud.vehicle, dmg * (w?.elem === 'corrosive' ? 1.5 : 1), src);
     else if (ud.kind === 'build') { const b = ud.build; b.hp -= dmg * (pick ? 2 : 1); b.mesh.material.opacity = 1; if (b.hp <= 0) this.removeBuild(b); }
     else if (ud.kind === 'harvest' && src.isPlayer && pick) {
@@ -329,7 +332,7 @@ export class Game {
     u.think -= dt; const g = u.gun;
     if (u.think <= 0) {
       u.think = 0.3 + Math.random() * 0.3; let best = null, bd = 1e9;
-      for (const e of this.units) if (e.alive && e.team !== u.team) { const d = e.pos.distanceTo(u.pos); if (d < bd && d < 80 && this.canSee(u, e) === true) { bd = d; best = e; } }
+      for (const e of this.units) if (e.alive && e.team !== u.team && !(e.cloakT > 0)) { const d = e.pos.distanceTo(u.pos); if (d < bd && d < 80 && this.canSee(u, e) === true) { bd = d; best = e; } }
       u.target = best; u.seeT = best ? (u.seeT || 0) : 0;
       if (!best && !u.goVeh && Math.random() < 0.15) { for (const v of this.vehicles) if (v.alive && v.team === u.team && v.pos.distanceTo(u.pos) < 35 && v.seats.some(s => !s.unit) && !this.units.some(o => o.goVeh === v)) { u.goVeh = v; break; } }
       if (u.goVeh && !best) u.wp.copy(u.goVeh.pos);
@@ -417,11 +420,12 @@ export class Game {
     if (P.alive && P.vehicle) { this.buildMode = null; this.pilot(P.vehicle, dt); }
     else if (P.alive) {
       P.spawnProt = Math.max(0, (P.spawnProt || 0) - dt);
-      const sp = 5.5 * (1 + this.save.stats.speed * 0.03) * (input.sprint && input.move.y > 0 && !input.ads ? 1.45 : 1) * (input.ads ? 0.6 : 1);
+      const sp = 5.5 * (P.speedMul || 1) * (1 + this.save.stats.speed * 0.03) * (input.sprint && input.move.y > 0 && !input.ads ? 1.45 : 1) * (input.ads ? 0.6 : 1);
       const fx = -Math.sin(P.yaw), fz = -Math.cos(P.yaw), rx = Math.cos(P.yaw), rz = -Math.sin(P.yaw);
       let mx = fx * input.move.y + rx * input.move.x, mz = fz * input.move.y + rz * input.move.x; const l = Math.hypot(mx, mz); if (l > 1) { mx /= l; mz /= l; }
       this.moveUnit(P, mx * sp * dt, mz * sp * dt, dt, input.jump);
       if (consume('KeyV', 'btn_melee')) this.melee(P);
+      if (consume('KeyH', 'btn_skill')) this.useSkill();
       if (consume('KeyT', 'btn_ntype')) { this.nadeType = this.nadeType === 'frag' ? 'plasma' : 'frag'; this.hooks.hud(this); }
       if (consume('KeyG', 'btn_nade')) { const d = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion); d.y += 0.15; d.normalize(); if (!this.throwNade(P, this.nadeType, d)) this.hooks.toast(`No ${this.nadeType} grenades`); }
       if (this.buildMode) { this.placeCd = (this.placeCd || 0) - dt; this.updateGhost(); if (input.fire) this.place(); if (consume('KeyR', 'btn_reload')) this.buildRot++; }
@@ -445,7 +449,7 @@ export class Game {
     const lod = this.tier === 'low' ? 85 : 160; for (const u of this.units) if (u.mesh && u.alive) u.mesh.visible = !u.vehicle && u.pos.distanceTo(P.pos) < lod;
     for (const v of this.vehicles) if (v.alive) v.mesh.visible = v.pos.distanceTo(P.pos) < lod * 2.2;
     this.updateCaps(dt);
-    this.updateDots(dt); this.regenShields(dt); this.updateLoot(dt);
+    this.updateSkill(dt); this.updateDots(dt); this.regenShields(dt); this.updateLoot(dt);
     // bots & respawns
     for (const u of this.units) {
       if (!u.alive) { u.respawn -= dt; if (u.respawn <= 0 && !this.over) {
@@ -675,7 +679,7 @@ export class Game {
   }
   updateDots(dt) { for (const u of this.units) { const d = u.dot; if (!d) continue; if (!u.alive) { u.dot = null; continue; }
       d.t -= dt; d.acc += dt; if (d.acc >= 0.5) { d.acc -= 0.5; this.hurt(u, d.dps * 0.5, d.src, false, d.elem); } if (d.t <= 0) u.dot = null; } }
-  regenShields(dt) { for (const u of this.units) if (u.alive) { u.shT += dt; if (u.shT > 4 && u.sh < u.maxSh) { const was = u.sh; u.sh = Math.min(u.maxSh, u.sh + 35 * dt); if (u.isPlayer && was === 0) { this.sfx('shieldUp'); this.hooks.toast('Shield recharging'); } } } }
+  regenShields(dt) { for (const u of this.units) if (u.alive) { u.shT += dt; if (u.shT > (u.shDelay || 4) && u.sh < u.maxSh) { const was = u.sh; u.sh = Math.min(u.maxSh, u.sh + 35 * dt); if (u.isPlayer && was === 0) { this.sfx('shieldUp'); this.hooks.toast('Shield recharging'); } } } }
   hurtVehicle(v, dmg, src) {
     if (!v.alive || (src && src.team === v.team && !arguments[3])) return; v.hp -= dmg; if (src?.isPlayer) this.hooks.hitmark(false);
     if (v.seats.some(s => s.unit === this.player)) this.hooks.hurt();
@@ -717,6 +721,26 @@ export class Game {
   openChest(c) { c.open = true; c.lid.rotation.x = -1.2; c.lid.position.set(0, 1.0, 0.35); this.sfx('capture'); const n = 2 + (Math.random() < 0.3 ? 1 : 0);
     for (let i = 0; i < n; i++) { const g = genGun(this.save.rank + 2); if (g.rarity === 0 && Math.random() < 0.6) Object.assign(g, genGun(this.save.rank + 2, 1)); this.dropLoot(g, { x: c.x, y: 0, z: c.z + 1.2 }); }
     this.hooks.toast('Chest opened'); }
+  // ---- classes ----
+  applyClass() { const S = this.save, P = this.player; this.cls = CLASSES[S.cls] ? S.cls : 'vanguard'; const C = CLASSES[this.cls];
+    P.maxSh = 70 + (this.cls === 'vanguard' ? 12 * lv(S, 'ironhide') : 0); P.sh = P.maxSh; P.shDelay = 4 - (this.cls === 'vanguard' ? 0.6 * lv(S, 'secondwind') : 0);
+    P.speedMul = 1 + (this.cls === 'ghostwire' ? 0.05 * lv(S, 'quickstep') : 0);
+    this.skill = { name: C.action.name, dur: C.action.dur + (this.cls === 'vanguard' ? 1.5 * lv(S, 'longwall') : this.cls === 'ghostwire' ? lv(S, 'linger') : 0), cd: C.action.cd - (this.cls === 'sparkwright' ? 4 * lv(S, 'overclock') : 0), t: 0, cdT: 0 };
+    P.dmgTaken = () => this.cls === 'vanguard' && this.skill.t > 0 ? 0.4 : 1; }
+  useSkill() { const k = this.skill, P = this.player; if (!P.alive || P.vehicle) return; if (k.cdT > 0) { this.hooks.toast(`${k.name} ready in ${Math.ceil(k.cdT)}s`); return; }
+    k.t = k.dur; k.cdT = k.cd; this.sfx('shieldUp'); this.hooks.toast(k.name.toUpperCase());
+    if (this.cls === 'vanguard') { P.sh = P.maxSh; }
+    else if (this.cls === 'ghostwire') { P.cloakT = k.dur; P.cloakShot = true; for (const u of this.units) if (u.target === P) u.target = null; }
+    else { const g = new THREE.Group(); const b = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.4, 1, 6), this.m(0x4a5560, 'metal')); b.position.y = 0.5;
+      const h = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.3, 0.6), this.m(0x4fc3ff)); h.position.y = 1.15; g.add(b, h); const f = new THREE.Vector3(-Math.sin(P.yaw), 0, -Math.cos(P.yaw));
+      g.position.set(P.pos.x + f.x * 1.5, P.pos.y, P.pos.z + f.z * 1.5); this.scene.add(g); this.turrets.push({ mesh: g, head: h, t: k.dur, cd: 0, pos: g.position, team: P.team, isPlayer: true, name: 'Arc Turret', kills: 0, dmgMul: 1 + 0.25 * lv(this.save, 'twincoil') }); } }
+  updateSkill(dt) { const k = this.skill, P = this.player; if (!k) return; k.cdT = Math.max(0, k.cdT - dt); k.t = Math.max(0, k.t - dt);
+    if (P.cloakT > 0) { P.cloakT -= dt; if (P.firedT > 1.4) P.cloakT = 0; } // firing breaks cloak
+    for (const t of this.turrets.slice()) { t.t -= dt; t.cd -= dt;
+      if (t.t <= 0) { this.scene.remove(t.mesh); this.turrets = this.turrets.filter(x => x !== t); continue; }
+      if (t.cd > 0) continue; let best = null, bd = 30; for (const e of this.units) if (e.alive && e.team !== t.team && !e.vehicle) { const d = e.pos.distanceTo(t.pos); if (d < bd && this.canSee({ pos: t.pos }, e) === true) { bd = d; best = e; } }
+      if (best) { t.cd = 0.25; t.head.rotation.y = Math.atan2(-(best.pos.x - t.pos.x), -(best.pos.z - t.pos.z)); const a = t.pos.clone(); a.y += 1.2; const b = best.pos.clone(); b.y += 1.2; this.tracer(a, b);
+        this.sfx('smg', t.pos); this.hurt(best, 9 * t.dmgMul, P, false, 'shock'); if (Math.random() < 0.15) best.dot = { elem: 'shock', dps: 10 * t.dmgMul, t: 3, acc: 0, src: P }; } } }
   end() {
     if (this.over) return; this.over = true; this.running = false; document.exitPointerLock?.();
     const won = this.score[0] > this.score[1], s = this.stats, big = this.map.type === 'war' ? 1.6 : this.map.type === 'large' ? 1.3 : 1;

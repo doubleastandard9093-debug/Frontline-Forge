@@ -64,3 +64,7 @@ body.touch #minimap{left:auto;right:calc(10px + var(--sr));top:calc(10px + var(-
 .dmgn.crit{font-size:21px}
 @keyframes dmgup{to{transform:translate(-50%,-160%);opacity:0}}
 .item.loot{padding-left:8px}
+.b-skill{right:calc(110px + var(--sr));bottom:calc(275px + var(--sb));width:56px!important;height:56px!important;font-size:11px!important;border-color:#b05cff!important}
+#skill{opacity:.7}#skill.ready{opacity:1;color:#ffd84a}
+body.cloaked #visor{background:radial-gradient(ellipse 120% 100% at 50% 50%,transparent 60%,rgba(150,90,255,.35) 100%)}
+.item.cls .row{margin:4px 0}
