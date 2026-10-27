@@ -52,3 +52,7 @@ body.touch #tracker{left:calc(10px + var(--sl));top:calc(64px + var(--st));botto
 #bl #shbar,#bl #hpbar{width:240px}
 #caps{position:absolute;top:calc(62px + var(--st));width:100%;text-align:center}.cap{display:inline-block;width:24px;height:24px;line-height:24px;margin:0 3px;border-radius:50%;border:2px solid #fff;font-size:13px}.cap.o0{background:#2f6fd8}.cap.o1{background:#d84a2f}.warn{color:#ff5040}
 #spawnsel{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);background:rgba(10,14,20,.92);border:1px solid #7fd8ff;border-radius:10px;padding:16px;text-align:center;pointer-events:auto;z-index:6;min-width:300px}
+#minimap{position:absolute;left:calc(14px + var(--sl));top:calc(14px + var(--st));width:160px;height:160px}
+#overview{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:min(86vh,86vw);height:min(86vh,86vw);background:rgba(8,12,16,.85);border:1px solid #7fd8ff;border-radius:8px}
+body.touch #minimap{left:auto;right:calc(10px + var(--sr));top:calc(10px + var(--st));width:104px;height:104px}body.touch #feed{top:calc(120px + var(--st))}body.touch #br{top:calc(124px + var(--st))}
+.b-map{left:calc(64px + var(--sl));top:calc(12px + var(--st));width:44px!important;height:44px!important;font-size:10px!important}

@@ -46,6 +46,10 @@ const hooks = {
     for (const v of g.vehicles) if (v.alive) { const dx = v.pos.x - P.pos.x, dz = v.pos.z - P.pos.z; if (Math.hypot(dx, dz) > range) continue; const rx = dx * cy - dz * sy, rz = dx * sy + dz * cy;
       x.fillStyle = v.team === P.team ? '#ffd84a' : '#ff3b30'; x.fillRect(R + rx / range * (R - 4) - 5, R + rz / range * (R - 4) - 5, 10, 10); }
   },
+  // Minimap (player-centred) and full overview map. Enemies only appear while firing.
+  maps(g, showOverview) {
+    drawMap(g, $('minimap'), false); const ov = $('overview'); ov.classList.toggle('hidden', !showOverview); if (showOverview) drawMap(g, ov, true);
+  },
   toast(m) { toastEl.textContent = m; clearTimeout(toastT); toastT = setTimeout(() => toastEl.textContent = '', 1200); },
   hitmark(head) { const h = $('hitm'); h.classList.toggle('head', head); h.style.opacity = 1; setTimeout(() => h.style.opacity = 0, 120); },
   shieldPop() { const h = $('pop'); h.classList.remove('go'); void h.offsetWidth; h.classList.add('go'); },
@@ -67,6 +71,23 @@ $('resume').onclick = () => { show(null); game.paused = false; };
 $('quit').onclick = () => { game.dispose(); show('menu'); };
 initInput(canvas, () => game && game.running && !game.paused);
 
+function drawMap(g, c, full) {
+  const x = c.getContext('2d'), W = c.width, H = c.height, P = g.player, size = g.map.size;
+  const span = full ? size + 10 : Math.min(size, 110), cx = full ? 0 : P.pos.x, cz = full ? 0 : P.pos.z, k = W / span;
+  const tx = wx => W / 2 + (wx - cx) * k, tz = wz => H / 2 + (wz - cz) * k;
+  x.clearRect(0, 0, W, H); x.save(); if (!full) { x.beginPath(); x.arc(W / 2, H / 2, W / 2 - 1, 0, 7); x.clip(); }
+  x.fillStyle = 'rgba(60,72,48,.85)'; x.fillRect(tx(-size / 2), tz(-size / 2), size * k, size * k);
+  x.fillStyle = 'rgba(50,110,150,.9)'; for (const w of (g.layout.water || [])) x.fillRect(tx(w[0]), tz(w[2]), (w[1] - w[0]) * k, (w[3] - w[2]) * k);
+  x.fillStyle = 'rgba(170,170,160,.85)'; for (const s of g.solids) if (!s.vehicle && !s.obj && s.max.x - s.min.x < size) x.fillRect(tx(s.min.x), tz(s.min.z), Math.max(1, (s.max.x - s.min.x) * k), Math.max(1, (s.max.z - s.min.z) * k));
+  x.fillStyle = 'rgba(200,150,90,.9)'; for (const b of g.builds) x.fillRect(tx(b.g.x) - 2, tz(b.g.z) - 2, 4, 4);
+  x.font = `bold ${full ? 14 : 10}px system-ui`; x.textAlign = 'center'; x.textBaseline = 'middle';
+  for (const p of g.capPoints) { x.fillStyle = p.owner === 0 ? '#2f6fd8' : p.owner === 1 ? '#d84a2f' : '#999'; x.beginPath(); x.arc(tx(p.x), tz(p.z), full ? 11 : 7, 0, 7); x.fill();
+    if (p.contested) { x.strokeStyle = '#ff0'; x.lineWidth = 2; x.stroke(); } x.fillStyle = '#fff'; x.fillText(p.n, tx(p.x), tz(p.z)); }
+  for (const v of g.vehicles) if (v.alive && (v.team === P.team || v.seats.some(s => s.unit && s.unit.firedT > 0))) { x.fillStyle = v.team === P.team ? '#ffd84a' : '#ff3b30'; x.fillRect(tx(v.pos.x) - 4, tz(v.pos.z) - 4, 8, 8); }
+  for (const u of g.units) if (u.alive && u !== P && !u.vehicle && (u.team === P.team || u.firedT > 0)) { x.fillStyle = u.team === P.team ? '#ffd84a' : '#ff3b30'; x.beginPath(); x.arc(tx(u.pos.x), tz(u.pos.z), full ? 4 : 3, 0, 7); x.fill(); }
+  x.translate(tx(P.pos.x), tz(P.pos.z)); x.rotate(-P.yaw); x.fillStyle = '#fff'; x.beginPath(); x.moveTo(0, -8); x.lineTo(5, 6); x.lineTo(-5, 6); x.fill(); x.restore();
+  if (!full) { x.strokeStyle = 'rgba(127,216,255,.7)'; x.lineWidth = 2; x.beginPath(); x.arc(W / 2, H / 2, W / 2 - 1, 0, 7); x.stroke(); }
+}
 function applyResult(r) {
   $('spawnsel').classList.add('hidden'); $('spawnsel').dataset.k = '';
   S.xp += r.xp; S.gp += r.gp; S.totals.kills += r.stats.kills; S.totals.deaths += r.stats.deaths; S.totals.matches++; if (r.won) S.totals.wins++;
@@ -78,7 +99,7 @@ function applyResult(r) {
   show('results');
 }
 
-function startMatch(id) { game = game || new Game(canvas, tier, S, hooks); game.paused = false; show(null); game.start(id, mode); }
+function startMatch(id) { $('spawnsel').classList.add('hidden'); $('spawnsel').dataset.k = ''; game = game || new Game(canvas, tier, S, hooks); game.paused = false; show(null); game.start(id, mode); }
 
 function rankHtml() {
   const prev = S.rank ? xpForRank(S.rank - 1) : 0, next = xpForRank(S.rank), pct = Math.min(100, (S.xp - prev) / (next - prev) * 100);

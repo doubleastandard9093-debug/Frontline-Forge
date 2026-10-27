@@ -376,6 +376,7 @@ export class Game {
     const sens = 0.0022 * (this.save.sens || 1) / (1 + (this.adsT || 0) * (w.adsZoom - 1 || 0));
     P.yaw -= input.look.x * sens; P.pitch = THREE.MathUtils.clamp(P.pitch - input.look.y * sens - this.recoilP, -1.5, 1.5);
     this.recoilP *= 0.6; P.pitch += 0; 
+    if (consume('KeyM', 'btn_map')) { this.overview = !this.overview; this.hooks.maps(this, this.overview); }
     this.updatePickups(dt); this.updateNades(dt); for (const u of this.units) u.meleeCd = (u.meleeCd || 0) - dt;
     if (consume('KeyF', 'btn_enter')) { if (P.vehicle || this.near || !this.nearPick) this.toggleVehicle(); else this.swapWeapon(); }
     if (P.alive && P.vehicle) { this.buildMode = null; this.pilot(P.vehicle, dt); }
@@ -421,7 +422,7 @@ export class Game {
     this.hudT = (this.hudT || 0) - dt; if (this.hudT <= 0) { this.hudT = 0.2; this.hooks.hud(this); }
     this.trkT = (this.trkT || 0) - dt; if (this.trkT <= 0) { this.trkT = 0.1; // motion tracker: allies always, enemies only when moving or firing
       for (const u of this.units) { u.firedT = (u.firedT || 0) - 0.1; u.spd = u.prev ? Math.hypot(u.pos.x - u.prev.x, u.pos.z - u.prev.z) / 0.1 : 0; u.prev = { x: u.pos.x, z: u.pos.z }; }
-      this.hooks.tracker(this); }
+      this.hooks.tracker(this); { this.mapT = (this.mapT || 0) + 1; if (this.overview || this.mapT % 2 === 0) this.hooks.maps(this, this.overview); } }
     if (first) input.pressed.clear();
   }
   // Weapon pickups: two-gun carry limit; F swaps the gun in hand for one on the ground.
