@@ -20,6 +20,7 @@ if (matchMedia('(pointer: coarse)').matches) document.body.classList.add('touch'
 const toastEl = $('toast'); let toastT;
 const hooks = {
   hud(g) {
+    $('gyroHint').classList.toggle('hidden', !(gyro.on && gyro.active && gyro.portrait));
     const P = g.player, w = g.slots[g.slot];
     $('sc0').textContent = g.score[0]; $('sc1').textContent = g.score[1];
     const t = Math.max(0, Math.ceil(g.timeLeft)); $('timer').textContent = `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`;
@@ -75,15 +76,16 @@ $('resume').onclick = () => { show(null); game.paused = false; };
 $('quit').onclick = () => { game.dispose(); show('menu'); };
 initInput(canvas, () => game && game.running && !game.paused);
 setGyroActive(() => game && game.running && !game.paused && !game.choosing);
-Object.assign(gyro, { on: !!S.gyro, sens: S.gyroSens ?? 1, invert: !!S.gyroInv, adsOnly: !!S.gyroAds });
+Object.assign(gyro, { on: !!S.gyro, sens: S.gyroSens ?? 1, invertX: !!S.gyroInvX, invertY: !!S.gyroInv, adsOnly: !!S.gyroAds });
 const isTouch = matchMedia('(pointer: coarse)').matches;
-function gyroStatus(t) { $('gyroNote').textContent = t || (!gyroSupported() ? 'Gyro needs a phone and HTTPS (the GitHub Pages link works; add to Home Screen from Safari).' : gyro.granted ? 'Gyro ready. Tilt to fine-aim; touch look still works.' : 'Tap Enable gyro to allow motion access.'); }
+function gyroStatus(t) { $('gyroNote').textContent = t || (!gyroSupported() ? 'Gyro needs a phone and HTTPS (the GitHub Pages link works; add to Home Screen from Safari).' : gyro.granted ? 'Gyro ready. Hold the phone sideways (landscape): turn or tilt left/right to look around, tilt toward/away to look up/down. Touch look still works.' : 'Tap Enable gyro to allow motion access.'); }
 function askGyro() { return enableGyro().then(ok => { if (ok) { S.gyro = true; gyro.on = true; S.gyroAsked = true; save(S); } else gyroStatus('Motion access was denied. On iPhone: remove and re-add the Home Screen app, or allow Motion & Orientation for Safari, then tap Enable gyro again.'); renderGyro(); return ok; }); }
-function renderGyro() { $('gyroOn').checked = gyro.on; $('gyroSens').value = gyro.sens; $('gyroInv').checked = gyro.invert; $('gyroAds').checked = gyro.adsOnly; gyroStatus(); }
+function renderGyro() { $('gyroOn').checked = gyro.on; $('gyroSens').value = gyro.sens; $('gyroInv').checked = gyro.invertY; $('gyroInvX').checked = gyro.invertX; $('gyroAds').checked = gyro.adsOnly; gyroStatus(); }
 $('gyroBtn').onclick = () => askGyro();
 $('gyroOn').onchange = e => { if (e.target.checked && !gyro.granted) { askGyro(); return; } gyro.on = S.gyro = e.target.checked; save(S); };
 $('gyroSens').oninput = e => { gyro.sens = S.gyroSens = +e.target.value; save(S); };
-$('gyroInv').onchange = e => { gyro.invert = S.gyroInv = e.target.checked; save(S); };
+$('gyroInv').onchange = e => { gyro.invertY = S.gyroInv = e.target.checked; save(S); };
+$('gyroInvX').onchange = e => { gyro.invertX = S.gyroInvX = e.target.checked; save(S); };
 $('gyroAds').onchange = e => { gyro.adsOnly = S.gyroAds = e.target.checked; save(S); };
 // returning players who already enabled it: re-request on the first tap (iOS forgets per session, prompt shows only once)
 if (S.gyro) addEventListener('touchend', function once() { removeEventListener('touchend', once); enableGyro(); }, { passive: true });

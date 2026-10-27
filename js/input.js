@@ -62,32 +62,44 @@ export function consumeHeld(code) { return keys.has(code); }
 export function consume(...codes) { for (const c of codes) if (input.pressed.has(c)) { input.pressed.delete(c); return true; } return false; }
 export function endFrame() { input.pressed.clear(); input.look.x = input.look.y = 0; }
 
-// ---- Gyro aim (phones). Uses DeviceMotion rotationRate (angular velocity), so it never drifts and adds on top of touch look.
-// iOS 13+ needs DeviceMotionEvent.requestPermission() called from a tap, and a secure context (HTTPS, e.g. GitHub Pages).
-export const gyro = { on: false, sens: 1, invert: false, adsOnly: false, granted: false, active: false, sx: 0, sy: 0 };
-let gyroBound = false, gyroActive = () => false;
+// ---- Gyro aim (phones), landscape-based. Uses DeviceMotion rotationRate (angular velocity, deg/s), so it never drifts
+// and adds on top of touch look. iOS 13+ needs DeviceMotionEvent.requestPermission() from a tap, plus HTTPS (GitHub Pages is fine).
+// Device frame (W3C): x = right edge in portrait, y = top edge, z = out of the screen; alpha/beta/gamma = rates about z/x/y.
+export const gyro = { on: false, sens: 1, invertX: false, invertY: false, adsOnly: false, granted: false, active: false, portrait: false, angle: 0, forceAngle: null, sx: 0, sy: 0 };
+let gyroBound = false, gyroActive = () => false; const isIOS = () => typeof window.DeviceMotionEvent?.requestPermission === 'function';
 export function gyroSupported() { return 'DeviceMotionEvent' in window && window.isSecureContext !== false; }
 export function enableGyro() { // call synchronously inside a tap handler
   if (!gyroSupported()) return Promise.resolve(false);
-  const req = window.DeviceMotionEvent.requestPermission;
-  const p = typeof req === 'function' ? req.call(window.DeviceMotionEvent).then(r => r === 'granted').catch(() => false) : Promise.resolve(true);
+  const p = isIOS() ? window.DeviceMotionEvent.requestPermission().then(r => r === 'granted').catch(() => false) : Promise.resolve(true);
   return p.then(ok => { gyro.granted = ok; if (ok) bindGyro(); return ok; });
 }
 export function setGyroActive(fn) { gyroActive = fn; }
-function screenAngle() { const a = screen.orientation?.angle ?? window.orientation ?? 0; return ((a % 360) + 360) % 360; }
+// Which landscape is the phone in? 90 = top edge to the LEFT, 270 (= -90) = top edge to the RIGHT, 0 = portrait.
+// Uses the screen angle when the page rotated; if the phone has rotation lock on (page stays portrait), falls back to gravity.
+let gx = 0, gy = 0;
+const appleGravity = () => /iPhone|iPad|iPod/.test(navigator.userAgent) || (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
+function landscapeAngle() {
+  if (gyro.forceAngle !== null) return ((gyro.forceAngle % 360) + 360) % 360;
+  const a = ((((screen.orientation?.angle ?? window.orientation ?? 0)) % 360) + 360) % 360; if (a === 90 || a === 270) return a;
+  if (Math.abs(gx) > 4 && Math.abs(gx) > Math.abs(gy) * 1.3) { const down = appleGravity() ? gx : -gx; return down < 0 ? 90 : 270; } // iOS reports gravity, Android reports its reaction
+  return 0;
+}
 function bindGyro() {
   if (gyroBound) return; gyroBound = true; let last = 0;
   addEventListener('devicemotion', e => {
+    const g = e.accelerationIncludingGravity; if (g && g.x != null) { gx += (g.x - gx) * 0.2; gy += (g.y - gy) * 0.2; }
     const r = e.rotationRate; if (!r) return; const now = performance.now(), dt = last ? Math.min(0.05, (now - last) / 1000) : 0; last = now; if (!dt) return;
-    gyro.active = true;
-    // rotationRate is in deg/s in the device frame: beta = about device x, gamma = about device y.
-    const bx = r.beta || 0, gy = r.gamma || 0, ang = screenAngle(); let yawR, pitchR;
-    if (ang === 90) { yawR = bx; pitchR = -gy; } else if (ang === 270) { yawR = -bx; pitchR = gy; } else if (ang === 180) { yawR = -gy; pitchR = -bx; } else { yawR = gy; pitchR = bx; }
-    // smoothing: low-pass + small deadzone to kill hand jitter
-    const k = 1 - Math.exp(-dt * 25); gyro.sx += (yawR - gyro.sx) * k; gyro.sy += (pitchR - gyro.sy) * k;
-    const dz = v => Math.abs(v) < 1.2 ? 0 : v - Math.sign(v) * 1.2;
+    gyro.active = true; const ang = landscapeAngle(); gyro.angle = ang; gyro.portrait = ang === 0;
+    const al = r.alpha || 0, be = r.beta || 0, ga = r.gamma || 0;
+    // Landscape: world-up is device +x (angle 90) or -x (270), so turning your body left/right = +/-beta,
+    // tilting the top of the screen toward/away from you = -/+gamma. Tilting like a steering wheel (about z) also steers.
+    let yawR = 0, pitchR = 0;
+    if (ang === 90) { yawR = be + al * 0.8; pitchR = -ga; } else if (ang === 270) { yawR = -be + al * 0.8; pitchR = ga; }
+    const k = 1 - Math.exp(-dt * 25); gyro.sx += (yawR - gyro.sx) * k; gyro.sy += (pitchR - gyro.sy) * k; // smoothing
+    if (gyro.portrait) { gyro.sx = gyro.sy = 0; return; } // landscape-only
+    const dz = v => Math.abs(v) < 1.2 ? 0 : v - Math.sign(v) * 1.2; // jitter deadzone (deg/s)
     if (!gyro.on || !gyroActive() || (gyro.adsOnly && !input.ads)) return;
     const toLook = Math.PI / 180 / 0.0022 * gyro.sens * dt; // degrees -> look units used by touch/mouse
-    input.look.x -= dz(gyro.sx) * toLook; input.look.y -= dz(gyro.sy) * toLook * (gyro.invert ? -1 : 1);
+    input.look.x -= dz(gyro.sx) * toLook * (gyro.invertX ? -1 : 1); input.look.y -= dz(gyro.sy) * toLook * (gyro.invertY ? -1 : 1);
   });
 }
