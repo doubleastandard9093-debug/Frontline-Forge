@@ -50,7 +50,7 @@ export function installZombies(G) {
     if (!opts.length) return; const s = opts[Math.floor(Math.random() * opts.length)];
     let u = this.zombiePool.find(x => !x.alive);
     if (!u) { u = this.makeUnit(1, false, 'Shambler'); u.zombie = true; const [body, legs, head, helm, gun] = u.mesh.children;
-      body.material = this.m(0x4c5a3a); legs.material = this.m(0x2e2a24); head.material = this.m(0x8f9d76); helm.visible = false; gun.visible = false;
+      body.material = this.m(0x4c5a3a); legs.material = this.m(0x2e2a24); head.material = this.m(0x8f9d76); helm.visible = false; gun.visible = false; if (this.hf) this.hf.zombify(u.mesh);
       const armG = new THREE.BoxGeometry(0.14, 0.14, 0.7), am = this.m(0x8f9d76); for (const x of [-0.3, 0.3]) { const a = new THREE.Mesh(armG, am); a.position.set(x, 1.35, -0.35); u.mesh.add(a); }
       this.zombiePool.push(u); }
     const R = z.round; u.maxHp = Math.round(R < 10 ? 60 + R * 40 : (60 + 9 * 40) * Math.pow(1.1, R - 9)); u.maxSh = 0;

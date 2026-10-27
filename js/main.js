@@ -12,6 +12,8 @@ import { RENTALS, RENT_PLANS, DURABLE, REPAIR, CAMOS, RETICLES, CRATE_PRICE, MAX
 
 const $ = id => document.getElementById(id);
 let S = load(); const tier = pickTier(S);
+// High-only realism pack: loaded only on High, so Low never fetches it.
+const HF = tier === 'high' ? await import('./hifi.js').catch(e => (console.warn('hifi', e), null)) : null;
 const sfx = new Sfx(tier, S.vol ?? 0.7); window.__sfx = sfx;
 for (const ev of ['pointerdown', 'keydown', 'touchstart']) addEventListener(ev, () => sfx.unlock(), { capture: true, passive: true });
 document.addEventListener('click', e => { if (e.target.closest('button')) sfx.play('ui'); });
@@ -22,7 +24,7 @@ document.querySelectorAll('[data-go]').forEach(b => b.onclick = () => { if (b.da
 if (matchMedia('(pointer: coarse)').matches) document.body.classList.add('touch');
 
 const toastEl = $('toast'); let toastT, dmgLive = 0;
-const hooks = {
+const hooks = { hf: HF,
   hud(g) {
     $('gyroHint').classList.toggle('hidden', !(gyro.on && gyro.active && gyro.portrait));
     const P = g.player, w = g.slots[g.slot];

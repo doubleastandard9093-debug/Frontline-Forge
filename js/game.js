@@ -16,7 +16,7 @@ const BOT_NAMES = ['Viper','Rook','Hatch','Nomad','Quill','Saber','Ghostline','T
 
 export class Game {
   constructor(canvas, tier, save, hooks) {
-    this.tier = tier; this.save = save; this.hooks = hooks;
+    this.tier = tier; this.save = save; this.hooks = hooks; this.hf = tier === 'high' ? hooks.hf || null : null;
     this.renderer = makeRenderer(canvas, tier);
     this.camera = new THREE.PerspectiveCamera(75, 1, 0.05, 600);
     this.ray = new THREE.Raycaster();
@@ -34,6 +34,7 @@ export class Game {
     const M = this.map = MAPS[mapId]; this.mode = mode; const L = M.gen(); this.layout = L;
     const s = this.scene = new THREE.Scene(); s.background = new THREE.Color(M.sky);
     s.fog = new THREE.Fog(M.sky, M.size * 0.6, M.size * 1.6);
+    if (this.hf) this.hf.init(this);
     s.add(new THREE.HemisphereLight(0xdfefff, 0x4a4030, this.tier === 'high' ? 1.1 : 1.4));
     const sun = new THREE.DirectionalLight(0xfff2dd, this.tier === 'high' ? 2.2 : 1.3); sun.position.set(40, 80, 30); s.add(sun);
     if (this.tier === 'high') { sun.castShadow = true; const h = M.size * 0.6; Object.assign(sun.shadow.camera, { left: -h, right: h, top: h, bottom: -h, far: 300 });
@@ -116,6 +117,9 @@ export class Game {
   makeUnit(team, isPlayer, name) {
     const u = { id: ++this.nextId, team, isPlayer, name, pos: new THREE.Vector3(), vy: 0, yaw: 0, pitch: 0, hp: 100, maxHp: 100, sh: 100, maxSh: 100, shT: 9, alive: true, onGround: false, kills: 0, deaths: 0, respawn: 0 };
     if (!isPlayer) {
+      if (this.hf) { const g = this.hf.soldier(team); this.scene.add(g); u.mesh = g;
+        g.traverse(p => { if (p.isMesh && p.userData.hit) { const head = p.userData.head, armor = p.userData.armor; p.userData = { kind: 'unit', unit: u, head, armor, hit: true }; this.hitMeshes.push(p); } });
+      } else {
       const g = new THREE.Group(), col = team === 0 ? 0x3d6fb0 : 0xb5452f;
       const body = new THREE.Mesh(new THREE.BoxGeometry(0.7, 1.1, 0.4), this.m(col)); body.position.y = 1.05;
       const legs = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.55, 0.35), this.m(0x34362c)); legs.position.y = 0.28;
@@ -124,7 +128,7 @@ export class Game {
       const gun = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.1, 0.7), this.m(0x222222)); gun.position.set(0.25, 1.25, -0.4);
       g.add(body, legs, head, helm, gun); this.scene.add(g); u.mesh = g;
       [body, legs, gun].forEach(p => { p.castShadow = true; p.userData = { kind: 'unit', unit: u, head: false }; this.hitMeshes.push(p); });
-      [head, helm].forEach(p => { p.castShadow = true; p.userData = { kind: 'unit', unit: u, head: true }; this.hitMeshes.push(p); });
+      [head, helm].forEach(p => { p.castShadow = true; p.userData = { kind: 'unit', unit: u, head: true }; this.hitMeshes.push(p); }); }
       u.gun = this.makeWeaponBot(); u.think = 0; u.target = null; u.wp = new THREE.Vector3(); u.strafe = 1; u.flanker = Math.random() < 0.35; u.skill = 0.55 + Math.random() * 0.35;
     }
     this.units.push(u); return u;
@@ -435,7 +439,7 @@ export class Game {
     if (u.bumped && Math.random() < 0.05) jump = true;
     const l = Math.hypot(mx, mz); if (l > 1) { mx /= l; mz /= l; }
     this.moveUnit(u, mx * speed * dt, mz * speed * dt, dt, jump);
-    u.mesh.position.copy(u.pos); u.mesh.rotation.y = u.yaw;
+    u.mesh.position.copy(u.pos); u.mesh.rotation.y = u.yaw; if (this.hf) this.hf.animate(u, dt);
   }
 
   // ---------- frame ----------
