@@ -23,6 +23,7 @@ export class Game {
 
   // ---------- match setup ----------
   start(mapId, mode = 'tdm') {
+    this.choosing = false;
     const M = this.map = MAPS[mapId]; this.mode = mode; const L = M.gen(); this.layout = L;
     const s = this.scene = new THREE.Scene(); s.background = new THREE.Color(M.sky);
     s.fog = new THREE.Fog(M.sky, M.size * 0.6, M.size * 1.6);
@@ -109,10 +110,13 @@ export class Game {
     this.units.push(u); return u;
   }
   makeWeaponBot() { const ids = ['kr4', 'kr4', 'hx2', 'bm12', 'vx9']; const id = ids[Math.floor(Math.random() * ids.length)], b = GUNS[id]; return Object.assign({ id, ammo: b.mag, reloading: 0, cd: 0 }, b); }
-  spawn(u) {
-    const sp = this.layout.spawns[u.team], h = this.map.size / 2 - 3;
+  // Spawn options: team base plus held, uncontested capture points.
+  spawnOptions(team) { return [{ id: 'base', name: 'Base', x: this.layout.spawns[team][0], z: this.layout.spawns[team][1] }].concat(this.capPoints.filter(c => c.owner === team && !c.contested).map(c => ({ id: c.n, name: `${c.n} ${c.name}`, x: c.x, z: c.z }))); }
+  spawn(u, at) {
+    if (!at && !u.isPlayer && this.capPoints.length && Math.random() < 0.5) { const o = this.spawnOptions(u.team); at = o[Math.floor(Math.random() * o.length)]; }
+    const isBase = !at || at.id === 'base', sp = isBase ? this.layout.spawns[u.team] : [at.x, at.z], h = this.map.size / 2 - 3, spread = isBase ? Math.min(this.map.size * 0.5, 60) : 10;
     for (let tries = 0; tries < 20; tries++) {
-      u.pos.set(THREE.MathUtils.clamp(sp[0] + (Math.random() - 0.5) * this.map.size * 0.5, -h, h), 0, THREE.MathUtils.clamp(sp[1] + (Math.random() - 0.5) * 8, -h, h));
+      u.pos.set(THREE.MathUtils.clamp(sp[0] + (Math.random() - 0.5) * spread, -h, h), 0, THREE.MathUtils.clamp(sp[1] + (Math.random() - 0.5) * (isBase ? 8 : 10), -h, h));
       if (!this.blocked(u.pos)) break;
     }
     u.vehicle = null; u.goVeh = null; u.hp = u.maxHp; u.nades = { frag: 2, plasma: 2 }; u.sh = u.maxSh; u.shT = 9; u.alive = true; u.vy = 0; u.yaw = u.team === 0 ? 0 : Math.PI; u.pitch = 0; u.spawnProt = 2;
@@ -408,7 +412,9 @@ export class Game {
     this.regenShields(dt);
     // bots & respawns
     for (const u of this.units) {
-      if (!u.alive) { u.respawn -= dt; if (u.respawn <= 0 && !this.over) this.spawn(u); continue; }
+      if (!u.alive) { u.respawn -= dt; if (u.respawn <= 0 && !this.over) {
+        if (u.isPlayer && this.capPoints.length) { if (!this.choosing) { this.choosing = true; document.exitPointerLock?.(); this.hooks.spawnSelect(this.spawnOptions(u.team)); } else this.hooks.spawnRefresh?.(this.spawnOptions(u.team)); }
+        else this.spawn(u); } continue; }
       if (!u.isPlayer) { u.spawnProt = Math.max(0, u.spawnProt - dt); this.botThink(u, dt); }
     }
     for (const tr of this.tracers) { tr.t -= dt; if (tr.t <= 0) { this.scene.remove(tr.l); tr.l.geometry.dispose(); } } this.tracers = this.tracers.filter(t => t.t > 0);
@@ -602,11 +608,12 @@ export class Game {
     for (const b of this.builds.slice()) { if (b.mesh.position.distanceTo(pt) < r + 1) { b.hp -= dmg * 1.5; if (b.hp <= 0) this.removeBuild(b); } }
   }
   // Capture points (Conquest): stand in the ring to flip it; each held point ticks score for its team.
+  chooseSpawn(id) { const o = this.spawnOptions(this.player.team).find(x => x.id === id); if (!o) return false; this.choosing = false; this.spawn(this.player, o); this.hooks.hud(this); return true; }
   updateCaps(dt) {
     if (!this.capPoints.length) return; this.capTick += dt; const tick = this.capTick >= 3; if (tick) this.capTick = 0;
     for (const c of this.capPoints) {
       let n0 = 0, n1 = 0; for (const u of this.units) if (u.alive && Math.hypot(u.pos.x - c.x, u.pos.z - c.z) < 8 && u.pos.y < 6) u.team ? n1++ : n0++;
-      const push = (n0 - n1) * 0.12 * dt; const before = c.owner;
+      c.contested = n0 > 0 && n1 > 0; const push = (n0 - n1) * 0.12 * dt; const before = c.owner;
       if (push) { c.prog = THREE.MathUtils.clamp(c.prog + push, -1, 1); if (c.prog >= 1) c.owner = 0; else if (c.prog <= -1) c.owner = 1; else if ((c.owner === 0 && c.prog < 0) || (c.owner === 1 && c.prog > 0)) c.owner = -1; }
       if (before !== c.owner && (n0 && this.player.team === 0 && Math.hypot(this.player.pos.x - c.x, this.player.pos.z - c.z) < 8)) { this.hooks.toast(c.owner === 0 ? `Captured ${c.n} ${c.name} +200 XP` : `${c.n} neutralized`); if (c.owner === 0) this.stats.caps = (this.stats.caps || 0) + 1; }
       const col = c.owner === 0 ? 0x4f8fff : c.owner === 1 ? 0xff6a4a : 0xffffff; c.flag.material.color.set(col); c.ring.material.color.set(col);

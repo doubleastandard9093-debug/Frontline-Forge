@@ -56,6 +56,10 @@ const hooks = {
   board(on) { const b = $('board'); b.classList.toggle('hidden', !on); if (!on || !game) return;
     const rows = game.units.slice().sort((a, c) => c.kills - a.kills).map(u => `<tr class="${u.team ? 'red' : 'blue'}"><td>${u.name}</td><td>${u.kills}</td><td>${u.deaths}</td></tr>`).join('');
     b.innerHTML = `<table><tr><td>Soldier</td><td>K</td><td>D</td></tr>${rows}</table>`; },
+  spawnSelect(opts) { $('spawnsel').classList.remove('hidden'); hooks.spawnRefresh(opts); },
+  spawnRefresh(opts) { const key = opts.map(o => o.id).join(); if ($('spawnsel').dataset.k === key) return; $('spawnsel').dataset.k = key;
+    $('spawnopts').innerHTML = opts.map(o => `<button data-sp="${o.id}">${o.name}</button>`).join('');
+    document.querySelectorAll('[data-sp]').forEach(b => b.onclick = () => { if (game.chooseSpawn(b.dataset.sp)) { $('spawnsel').classList.add('hidden'); $('spawnsel').dataset.k = ''; } else b.disabled = true; }); },
   pause() { game.paused = true; document.exitPointerLock?.(); show('pause'); },
   end(r) { applyResult(r); },
 };
@@ -64,6 +68,7 @@ $('quit').onclick = () => { game.dispose(); show('menu'); };
 initInput(canvas, () => game && game.running && !game.paused);
 
 function applyResult(r) {
+  $('spawnsel').classList.add('hidden'); $('spawnsel').dataset.k = '';
   S.xp += r.xp; S.gp += r.gp; S.totals.kills += r.stats.kills; S.totals.deaths += r.stats.deaths; S.totals.matches++; if (r.won) S.totals.wins++;
   const before = S.rank; while (S.rank < RANKS.length - 1 && S.xp >= xpForRank(S.rank)) { S.rank++; S.points += 1; S.gp += 250; }
   save(S);
