@@ -25,10 +25,13 @@ const hooks = {
     $('ammo').textContent = w.pick ? '—' : w.reloading > 0 ? 'RELOAD' : `${w.ammo} / ${w.mag}`;
     $('mats').textContent = `Wood ${g.mats.wood} · Stone ${g.mats.stone} · ${g.nadeType === 'frag' ? '▶' : ''}Frag ${P.nades.frag} ${g.nadeType === 'plasma' ? '▶' : ''}Plasma ${P.nades.plasma}`;
     $('bmode').textContent = g.buildMode ? `BUILD: ${g.buildMode.toUpperCase()} (10 wood)` : '';
-    const v = P.vehicle; if (v) { $('wname').textContent = `${v.K.name} · Armor ${Math.ceil(v.hp)}/${v.K.hp}`; $('ammo').textContent = v.K.weapons[1].ammoMax < 50 ? `${v.K.weapons[1].name} ${Math.floor(v.ammo[1])}` : v.K.weapons[1].name; }
+    const v = P.vehicle; if (v) { $('wname').textContent = `${v.K.name} · Armor ${Math.ceil(v.hp)}/${v.K.hp}`; const seat = v.seats.find(s => s.unit === P), w1 = v.K.weapons[1]; $('ammo').textContent = seat.role === 'driver' && v.K.mode === 'car' ? `${Math.round(Math.abs(v.speed) * 3.6)} km/h` : w1 ? (w1.ammoMax < 50 ? `${w1.name} ${Math.floor(v.ammo[1])}` : w1.name) : v.K.weapons[0].name;
+      if (v.K.mode === 'jet' || v.K.mode === 'heli') $('ammo').textContent += ` · ALT ${Math.round(v.pos.y)}m${v.K.mode === 'jet' ? ` · ${Math.round(v.speed * 3.6)} km/h` : ''}`;
+      $('wname').classList.toggle('warn', v.hp < v.K.hp * 0.3); if (v.hp < v.K.hp * 0.3) $('wname').textContent += ' · ARMOR CRITICAL'; }
+    $('caps').innerHTML = g.capPoints.map(c => `<span class="cap o${c.owner}">${c.n}</span>`).join('');
     $('prompt').textContent = g.near ? `${matchMedia('(pointer: coarse)').matches ? 'Tap ENTER' : 'Press F'} to pilot ${g.near.K.name}` : g.nearPick ? `${matchMedia('(pointer: coarse)').matches ? 'Tap ENTER' : 'Press F'} to swap for ${GUNS[g.nearPick.id].name}` : '';
     $('dead').classList.toggle('hidden', P.alive);
-    $('goal').textContent = `${g.map.name} · ${g.mode === 'coop' ? 'Co-op vs Bots' : g.map.mode} · first to ${g.map.scoreLimit}`;
+    $('goal').textContent = `${g.map.name} · ${g.mode === 'coop' ? 'Co-op vs Bots' : g.map.mode}${g.capPoints.length ? ' (hold points)' : ''} · first to ${g.map.scoreLimit}`;
   },
   tracker(g) {
     const c = $('tracker'), x = c.getContext('2d'), R = c.width / 2, range = 25, P = g.player; x.clearRect(0, 0, c.width, c.height);
@@ -80,7 +83,7 @@ function render(id) {
   if (id === 'menu') $('profile').innerHTML = rankHtml();
   if (id === 'play') {
     document.querySelectorAll('#modes button').forEach(b => { b.classList.toggle('on', b.dataset.mode === mode); b.onclick = () => { mode = b.dataset.mode; render('play'); }; });
-    $('maps').innerHTML = Object.entries(MAPS).map(([k, m]) => `<button class="card" data-map="${k}"><span class="tag">${m.type === 'small' ? 'SMALL · QUICK' : 'LARGE · BIG BATTLE'}</span><b>${m.name}</b><small>${m.desc} ${m.teamSize}v${mode === 'coop' ? Math.round(m.teamSize * 1.5) : m.teamSize}, first to ${m.scoreLimit}, ${m.time / 60} min</small></button>`).join('');
+    $('maps').innerHTML = Object.entries(MAPS).map(([k, m]) => `<button class="card" data-map="${k}"><span class="tag">${{ small: 'SMALL · QUICK', large: 'ARENA · BIG BATTLE', war: 'FULL-SCALE · LAND, SEA & AIR' }[m.type]}</span><b>${m.name}</b><small>${m.desc} ${m.teamSize}v${mode === 'coop' ? Math.round(m.teamSize * 1.5) : m.teamSize}, first to ${m.scoreLimit}, ${m.time / 60} min</small></button>`).join('');
     document.querySelectorAll('[data-map]').forEach(b => b.onclick = () => startMatch(b.dataset.map));
   }
   if (id === 'armory') renderShop();

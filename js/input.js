@@ -25,9 +25,9 @@ export function initInput(canvas, isActive) {
       const t = e.changedTouches[0];
       if (name === 'fire') { input.fire = true; lookIds.set(t.identifier, { x: t.clientX, y: t.clientY, btn: 'fire' }); }
       else if (name === 'ads') input.ads = !input.ads, b.classList.toggle('on', input.ads);
-      else input.pressed.add('btn_' + name);
+      else { input.pressed.add('btn_' + name); if (name === 'jump') input.jumpHeld = true; }
     }, { passive: false });
-    b.addEventListener('touchend', e => { e.preventDefault(); if (name === 'fire') input.fire = false; }, { passive: false });
+    b.addEventListener('touchend', e => { e.preventDefault(); if (name === 'fire') input.fire = false; if (name === 'jump') input.jumpHeld = false; }, { passive: false });
   });
   canvas.addEventListener('touchstart', e => {
     e.preventDefault(); input.touch = true; document.body.classList.add('touch');
@@ -56,7 +56,8 @@ export function pollKeys() {
     input.move.y = (keys.has('KeyW') ? 1 : 0) - (keys.has('KeyS') ? 1 : 0);
     input.sprint = keys.has('ShiftLeft');
   }
-  input.jump = keys.has('Space') || input.pressed.has('btn_jump');
+  input.jump = keys.has('Space') || input.pressed.has('btn_jump') || !!input.jumpHeld;
 }
+export function consumeHeld(code) { return keys.has(code); }
 export function consume(...codes) { for (const c of codes) if (input.pressed.has(c)) { input.pressed.delete(c); return true; } return false; }
 export function endFrame() { input.pressed.clear(); input.look.x = input.look.y = 0; }

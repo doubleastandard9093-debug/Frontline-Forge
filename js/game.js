@@ -3,7 +3,7 @@ import { GUNS, ATTACH, BUILD, GRID } from './data.js';
 import { MAPS } from './maps.js';
 import { mat, makeRenderer, isPhone } from './gfx.js';
 import { KINDS, createVehicle, syncSolid } from './vehicles.js';
-import { input, pollKeys, consume, endFrame } from './input.js';
+import { input, pollKeys, consume, endFrame, consumeHeld } from './input.js';
 
 const TICK = 1 / 60, EYE = 1.6, RAD = 0.4, GRAV = 15; // lower gravity, floaty high jumps
 const BOT_NAMES = ['Viper','Rook','Hatch','Nomad','Quill','Saber','Ghostline','Tank','Moth','Flint','Ruckus','Jinx','Bolt','Cinder','Drift','Echo','Grim','Halo','Ion','Kestrel','Lynx','Mako','Onyx','Pike'];
@@ -36,6 +36,14 @@ export class Game {
     const half = M.size / 2;
     for (const [x, z, w, d] of [[0, -half - 1, M.size + 4, 2], [0, half + 1, M.size + 4, 2], [-half - 1, 0, 2, M.size + 4], [half + 1, 0, 2, M.size + 4]])
       this.addBox(x, z, w, d, 6, 0x6e6a60, 'concrete');
+    for (const w of (L.water || [])) { const wm = new THREE.Mesh(new THREE.PlaneGeometry(w[1] - w[0], w[3] - w[2]), this.tier === 'high' ? new THREE.MeshStandardMaterial({ color: 0x2f6f8f, roughness: 0.15, metalness: 0.1, transparent: true, opacity: 0.88 }) : new THREE.MeshLambertMaterial({ color: 0x3a7896 }));
+      wm.rotation.x = -Math.PI / 2; wm.position.set((w[0] + w[1]) / 2, 0.04, (w[2] + w[3]) / 2); wm.userData.kind = 'ground'; s.add(wm); }
+    this.capPoints = (L.caps || []).map(c => { const ring = new THREE.Mesh(new THREE.RingGeometry(7.4, 8, 32), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.6, side: THREE.DoubleSide }));
+      ring.rotation.x = -Math.PI / 2; ring.position.set(c.x, 0.08, c.z); s.add(ring);
+      const pole = new THREE.Mesh(new THREE.BoxGeometry(0.2, 7, 0.2), this.m(0xdddddd)); pole.position.set(c.x, 3.5, c.z); s.add(pole);
+      const flag = new THREE.Mesh(new THREE.BoxGeometry(1.6, 1, 0.05), new THREE.MeshBasicMaterial({ color: 0xffffff })); flag.position.set(c.x + 0.8, 6.4, c.z); s.add(flag);
+      return Object.assign({}, c, { owner: -1, prog: 0, ring, flag }); });
+    this.capTick = 0;
     for (const b of L.boxes) this.addBox(b[0], b[1], b[2], b[3], b[4], { concrete: 0x9a958a, metal: 0x58636e, wood: 0x8d6a3e }[b[5]], b[5]);
     const trunkG = new THREE.CylinderGeometry(0.25, 0.35, 3, 6), leafG = new THREE.ConeGeometry(1.6, 4, this.tier === 'high' ? 8 : 5), rockG = new THREE.DodecahedronGeometry(1.2, 0);
     for (const [x, z] of L.trees) { const t = new THREE.Group(); const tr = new THREE.Mesh(trunkG, this.m(0x5a3d22, 'wood')); tr.position.y = 1.5;
@@ -57,7 +65,7 @@ export class Game {
     this.nextId = 0; this.units = []; this.score = [0, 0]; this.timeLeft = M.time; this.over = false;
     const st = this.save.stats;
     this.player = this.makeUnit(0, true, 'You'); this.player.maxHp = 100 + st.hp * 5;
-    const lowPhone = this.tier === 'low' && isPhone; this.teamSize = lowPhone ? Math.min(M.teamSize, 6) : M.teamSize; // phone Low caps bots
+    const lowPhone = this.tier === 'low' && isPhone; this.teamSize = lowPhone ? Math.min(M.teamSize, 6) : this.tier === 'low' ? Math.min(M.teamSize, 12) : M.teamSize; // phone Low caps bots
     this.camera.far = this.tier === 'low' ? Math.min(220, M.size * 1.4) : 600; this.camera.updateProjectionMatrix();
     for (let i = 1; i < this.teamSize; i++) this.makeUnit(0, false, BOT_NAMES[i % BOT_NAMES.length]);
     const foes = mode === 'coop' ? Math.round(this.teamSize * 1.5) : this.teamSize; // co-op: your bot squad vs a larger, sharper enemy force
@@ -107,7 +115,7 @@ export class Game {
       u.pos.set(THREE.MathUtils.clamp(sp[0] + (Math.random() - 0.5) * this.map.size * 0.5, -h, h), 0, THREE.MathUtils.clamp(sp[1] + (Math.random() - 0.5) * 8, -h, h));
       if (!this.blocked(u.pos)) break;
     }
-    u.hp = u.maxHp; u.nades = { frag: 2, plasma: 2 }; u.sh = u.maxSh; u.shT = 9; u.alive = true; u.vy = 0; u.yaw = u.team === 0 ? 0 : Math.PI; u.pitch = 0; u.spawnProt = 2;
+    u.vehicle = null; u.goVeh = null; u.hp = u.maxHp; u.nades = { frag: 2, plasma: 2 }; u.sh = u.maxSh; u.shT = 9; u.alive = true; u.vy = 0; u.yaw = u.team === 0 ? 0 : Math.PI; u.pitch = 0; u.spawnProt = 2;
     if (u.mesh) u.mesh.visible = true;
   }
   blocked(p) { for (const s of this.solids) if (p.x > s.min.x - RAD && p.x < s.max.x + RAD && p.z > s.min.z - RAD && p.z < s.max.z + RAD && s.max.y > p.y + 0.5 && s.min.y < p.y + 1.7) return true; return false; }
@@ -124,7 +132,7 @@ export class Game {
     return h;
   }
   moveUnit(u, dx, dz, dt, jump) {
-    const p = u.pos;
+    const p = u.pos; if (!u.K && this.layout.water && this.isWater(p.x, p.z)) { dx *= 0.45; dz *= 0.45; } // wading
     for (const [ax, az] of [[dx, 0], [0, dz]]) {
       p.x += ax; p.z += az;
       for (const s of this.solids) {
@@ -286,14 +294,19 @@ export class Game {
     return true;
   }
   botThink(u, dt) {
+    if (u.vehicle) return this.botDrive(u, dt);
+    if (u.goVeh) { const v = u.goVeh; if (!v.alive || !v.seats.some(s => !s.unit)) u.goVeh = null; else if (v.pos.distanceTo(u.pos) < v.K.r + 2.5) { if (this.enterVehicle(u, v)) return; } }
     u.think -= dt; const g = u.gun;
     if (u.think <= 0) {
       u.think = 0.3 + Math.random() * 0.3; let best = null, bd = 1e9;
       for (const e of this.units) if (e.alive && e.team !== u.team) { const d = e.pos.distanceTo(u.pos); if (d < bd && d < 80 && this.canSee(u, e) === true) { bd = d; best = e; } }
       u.target = best; u.seeT = best ? (u.seeT || 0) : 0;
+      if (!best && !u.goVeh && Math.random() < 0.15) { for (const v of this.vehicles) if (v.alive && v.team === u.team && v.pos.distanceTo(u.pos) < 35 && v.seats.some(s => !s.unit) && !this.units.some(o => o.goVeh === v)) { u.goVeh = v; break; } }
+      if (u.goVeh && !best) u.wp.copy(u.goVeh.pos);
       if (!best && (u.pos.distanceTo(u.wp) < 3 || Math.random() < 0.05 || u.bumped)) {
-        const enemies = this.units.filter(e => e.alive && e.team !== u.team), e = enemies[Math.floor(Math.random() * enemies.length)];
-        const h = this.map.size / 2 - 4; u.wp.set(THREE.MathUtils.clamp((e ? e.pos.x : 0) + (Math.random() - 0.5) * 30, -h, h), 0, THREE.MathUtils.clamp((e ? e.pos.z : 0) + (Math.random() - 0.5) * 30, -h, h));
+        const caps = this.capPoints.filter(c => c.owner !== u.team); const enemies = this.units.filter(e => e.alive && e.team !== u.team);
+        const e = caps.length && Math.random() < 0.75 ? { pos: new THREE.Vector3(caps[Math.floor(Math.random() * caps.length)].x, 0, caps[Math.floor(Math.random() * caps.length)].z) } : enemies[Math.floor(Math.random() * enemies.length)];
+        const h = this.map.size / 2 - 4; const sc = this.capPoints.length ? 10 : 30; u.wp.set(THREE.MathUtils.clamp((e ? e.pos.x : 0) + (Math.random() - 0.5) * sc, -h, h), 0, THREE.MathUtils.clamp((e ? e.pos.z : 0) + (Math.random() - 0.5) * sc, -h, h));
         u.bumped = false;
       }
       if (Math.random() < 0.3) u.strafe *= -1;
@@ -314,7 +327,8 @@ export class Game {
       else if (g.cd <= 0 && u.seeT > 0.45) {
         g.cd = 60 / g.rpm * (g.auto ? 1.6 : 1.2); g.ammo--; u.firedT = 1.5;
         const vis = this.canSee(u, t); const from = u.pos.clone(); from.y += 1.3;
-        if (vis !== true) { if (['build', 'vehicle'].includes(vis.object?.userData.kind)) this.damageAt(vis, g.dmg, u); this.tracer(from, vis.point); }
+        if (vis === false) {}
+        else if (vis !== true) { if (['build', 'vehicle'].includes(vis.object?.userData.kind)) this.damageAt(vis, g.dmg, u); this.tracer(from, vis.point); }
         else { const chance = u.skill * (1 - Math.min(dist / (g.range * 1.6), 0.8)) * (t.isPlayer ? 0.55 : 0.6);
           const hits = g.pellets ? Math.round(g.pellets * chance) : (Math.random() < chance ? 1 : 0);
           const to = t.pos.clone(); to.y += 1.3; to.x += (Math.random() - 0.5) * (hits ? 0.3 : 2); to.z += (Math.random() - 0.5) * (hits ? 0.3 : 2);
@@ -360,7 +374,7 @@ export class Game {
     this.recoilP *= 0.6; P.pitch += 0; 
     this.updatePickups(dt); this.updateNades(dt); for (const u of this.units) u.meleeCd = (u.meleeCd || 0) - dt;
     if (consume('KeyF', 'btn_enter')) { if (P.vehicle || this.near || !this.nearPick) this.toggleVehicle(); else this.swapWeapon(); }
-    if (P.alive && P.vehicle) { this.pilot(P.vehicle, dt); }
+    if (P.alive && P.vehicle) { this.buildMode = null; this.pilot(P.vehicle, dt); }
     else if (P.alive) {
       P.spawnProt = Math.max(0, (P.spawnProt || 0) - dt);
       const sp = 5.5 * (1 + this.save.stats.speed * 0.03) * (input.sprint && input.move.y > 0 && !input.ads ? 1.45 : 1) * (input.ads ? 0.6 : 1);
@@ -388,7 +402,9 @@ export class Game {
     this.near = null; if (!P.vehicle && P.alive) for (const v of this.vehicles) if (v.alive && v.team === P.team && v.pos.distanceTo(P.pos) < 5 && v.seats.some(s => !s.unit)) { this.near = v; break; }
     for (const v of this.vehicles) if (!v.alive) { v.respawn -= dt; if (v.respawn <= 0) this.respawnVehicle(v); }
     // view-distance LOD: skip drawing far bots
-    const lod = this.tier === 'low' ? 85 : 160; for (const u of this.units) if (u.mesh && u.alive) u.mesh.visible = u.pos.distanceTo(P.pos) < lod;
+    const lod = this.tier === 'low' ? 85 : 160; for (const u of this.units) if (u.mesh && u.alive) u.mesh.visible = !u.vehicle && u.pos.distanceTo(P.pos) < lod;
+    for (const v of this.vehicles) if (v.alive) v.mesh.visible = v.pos.distanceTo(P.pos) < lod * 2.2;
+    this.updateCaps(dt);
     this.regenShields(dt);
     // bots & respawns
     for (const u of this.units) {
@@ -461,34 +477,122 @@ export class Game {
     if (u.isPlayer && bd > 1.2) { const d = best.pos.clone().sub(u.pos).setY(0).normalize(); this.moveUnit(u, d.x * (bd - 1), d.z * (bd - 1), 0, false); }
     this.hurt(best, behind ? 300 : 70, u, false); if (u.isPlayer) this.hooks.toast(behind ? 'ASSASSINATION' : 'Melee');
   }
-  toggleVehicle() {
-    const P = this.player;
-    if (P.vehicle) { const v = P.vehicle; v.seats.forEach(s => { if (s.unit === P) s.unit = null; }); P.vehicle = null;
-      P.pos.set(v.pos.x + Math.cos(v.yaw) * 3, v.pos.y, v.pos.z - Math.sin(v.yaw) * 3); if (this.blocked(P.pos)) P.pos.set(v.pos.x, v.solid.max.y, v.pos.z);
-      P.vy = 0; this.selectSlot(this.slot); this.hooks.toast('Exited vehicle'); this.hooks.hud(this); return; }
-    const v = this.near; if (!v) return; const seat = v.seats.find(s => !s.unit); seat.unit = P; P.vehicle = v; P.pos.copy(v.pos); P.yaw = v.yaw; this.buildMode = null;
-    this.hooks.toast(`${v.K.name}: ${v.K.weapons.map((w, i) => ['Fire', 'Aim/Alt', 'Edit/G'][i] + ' = ' + w.name).join(' · ')}`); this.hooks.hud(this);
+  // ---------- vehicles (shared by player and bots) ----------
+  seatOf(u) { return u.vehicle ? u.vehicle.seats.find(s => s.unit === u) : null; }
+  enterVehicle(u, v) {
+    const seat = v.seats.find(s => !s.unit); if (!seat || !v.alive) return false; seat.unit = u; u.vehicle = v; u.pos.copy(v.pos); if (u.mesh) u.mesh.visible = false; u.goVeh = null;
+    if (u.isPlayer) { u.yaw = v.yaw; this.buildMode = null; const w = seat.role === 'gunner' || v.K.mode !== 'car' ? v.K.weapons : [];
+      this.hooks.toast(`${v.K.name} (${seat.role})${w.length ? ': ' + w.map((x, i) => ['Fire', 'Aim', 'G'][i] + ' = ' + x.name).join(' · ') : ''}`); this.hooks.hud(this); }
+    return true;
   }
+  exitVehicle(u) {
+    const v = u.vehicle; if (!v) return; v.seats.forEach(s => { if (s.unit === u) s.unit = null; }); u.vehicle = null;
+    u.pos.set(v.pos.x + Math.cos(v.yaw) * (v.K.r + 1.2), Math.max(0, v.pos.y - 1), v.pos.z - Math.sin(v.yaw) * (v.K.r + 1.2)); if (this.blocked(u.pos)) u.pos.set(v.pos.x, v.solid.max.y, v.pos.z);
+    u.vy = 0; if (u.mesh) u.mesh.visible = true;
+    if (u.isPlayer) { this.selectSlot(this.slot); this.hooks.toast('Exited vehicle'); this.hooks.hud(this); }
+  }
+  toggleVehicle() { const P = this.player; if (P.vehicle) return this.exitVehicle(P); if (this.near) this.enterVehicle(P, this.near); }
+  isWater(x, z) { const w = this.layout.water; return !!w && w.some(r => x > r[0] && x < r[1] && z > r[2] && z < r[3]); }
+  // ctrl: { mx, my (-1..1), aimYaw, aimPitch, up, down, fire, alt, special }
+  drive(v, c, dt) {
+    const K = v.K, mode = K.mode; let mx = 0, mz = 0;
+    v.cd = v.cd.map(t => t - dt); K.weapons.forEach((w, i) => { if (w.regen && v.ammo[i] < w.ammoMax) v.ammo[i] = Math.min(w.ammoMax, v.ammo[i] + dt / w.regen); });
+    const fwd = y => [-Math.sin(y), -Math.cos(y)];
+    if (mode === 'walker') { v.yaw = c.aimYaw; const [fx, fz] = fwd(v.yaw); mx = (fx * c.my + Math.cos(v.yaw) * c.mx) * K.speed * dt; mz = (fz * c.my - Math.sin(v.yaw) * c.mx) * K.speed * dt; }
+    else if (mode === 'tracked' || mode === 'car' || mode === 'boat') {
+      const target = c.my * K.speed; v.speed += THREE.MathUtils.clamp(target - v.speed, -K.speed * 1.5 * dt, K.speed * (mode === 'tracked' ? 1 : 0.8) * dt);
+      v.yaw -= c.mx * K.turn * dt * (mode === 'tracked' ? 1 : THREE.MathUtils.clamp(Math.abs(v.speed) / 5, 0, 1) * Math.sign(v.speed || 1));
+      const [fx, fz] = fwd(v.yaw); mx = fx * v.speed * dt; mz = fz * v.speed * dt;
+      const nx = v.pos.x + mx * 3, nz = v.pos.z + mz * 3, wet = this.isWater(nx, nz);
+      if (mode === 'boat' ? !wet : wet) { mx = mz = 0; v.speed *= -0.3; }
+    }
+    if (mode === 'heli' || mode === 'jet') this.fly(v, c, dt);
+    else { const before = v.pos.clone(); this.moveUnit(v, mx, mz, dt, false); if (v.pos.distanceTo(before) < Math.hypot(mx, mz) * 0.5 && mode !== 'walker') v.speed *= 0.5; }
+    syncSolid(v); for (const s of v.seats) if (s.unit) s.unit.pos.copy(v.pos);
+    // animate
+    const P = v.mesh.userData.parts; v.mesh.position.copy(v.pos); v.mesh.rotation.set(v.pitch, v.yaw, v.roll, 'YXZ');
+    if (mode === 'boat') v.mesh.position.y = 0.1 + Math.sin(performance.now() / 400 + v.id) * 0.08;
+    if (P.legs) { v.walk += Math.hypot(mx, mz) * 1.6; P.legs[0].rotation.x = Math.sin(v.walk) * 0.5; P.legs[1].rotation.x = -Math.sin(v.walk) * 0.5; P.torso.rotation.x = c.aimPitch * 0.3; P.torso.position.y = 2.9 + Math.abs(Math.sin(v.walk)) * 0.12; }
+    if (P.turret) { const gunner = v.seats.find(s => s.role === 'gunner'); const aimY = gunner ? (gunner.unit ? gunner.aimYaw ?? v.yaw : v.yaw) : c.aimYaw; P.turret.rotation.y = aimY - v.yaw; }
+    if (P.rotor) P.rotor.rotation.y += dt * 25;
+    // weapons: driver fires unless the vehicle has a dedicated gunner seat (buggy/boat/heli gunner)
+    if (K.mode !== 'car' && c.fire) this.vfire(v, 0, c);
+    if (c.alt && K.weapons[1]) this.vfire(v, 1, c);
+    if (c.special && K.weapons[2]) this.vfire(v, 2, c);
+    // mech polish: smoke + warning when armor is low
+    if (v.hp < K.hp * 0.3 && Math.random() < dt * 8) this.smoke(v);
+  }
+  fly(v, c, dt) {
+    const K = v.K;
+    if (K.mode === 'heli') {
+      v.yaw += THREE.MathUtils.clamp(((c.aimYaw - v.yaw + Math.PI * 3) % (Math.PI * 2)) - Math.PI, -2 * dt, 2 * dt);
+      const [fx, fz] = [-Math.sin(v.yaw), -Math.cos(v.yaw)], rx = Math.cos(v.yaw), rz = -Math.sin(v.yaw);
+      v.vx = THREE.MathUtils.lerp(v.vx || 0, (fx * c.my + rx * c.mx) * K.speed, dt * 1.5); v.vz = THREE.MathUtils.lerp(v.vz || 0, (fz * c.my + rz * c.mx) * K.speed, dt * 1.5);
+      v.vy = THREE.MathUtils.lerp(v.vy, (c.up ? 7 : 0) - (c.down ? 7 : 0), dt * 2);
+      v.pitch = THREE.MathUtils.lerp(v.pitch, -c.my * 0.2, dt * 3); v.roll = THREE.MathUtils.lerp(v.roll, -c.mx * 0.25, dt * 3);
+      const n = v.pos.clone().add(new THREE.Vector3(v.vx * dt, v.vy * dt, v.vz * dt)); n.y = THREE.MathUtils.clamp(n.y, 1.2, K.ceiling);
+      if (this.airHit(v, n)) { v.vx *= -0.3; v.vz *= -0.3; v.vy = 0; this.hurtVehicle(v, 15, null, true); v.pos.y += 1; } else v.pos.copy(n);
+    } else { // jet: always moving forward; mouse/aim steers, W/S throttle
+      v.speed = THREE.MathUtils.clamp((v.speed || K.minSpeed * 0.0) + c.my * 12 * dt, 0, K.speed);
+      const dy = ((c.aimYaw - v.yaw + Math.PI * 3) % (Math.PI * 2)) - Math.PI; v.yaw += THREE.MathUtils.clamp(dy, -1.2 * dt, 1.2 * dt); v.roll = THREE.MathUtils.lerp(v.roll, THREE.MathUtils.clamp(dy, -1, 1) * 0.9, dt * 3);
+      const lift = v.speed >= K.minSpeed; const tp = lift ? THREE.MathUtils.clamp(c.aimPitch, -0.7, 0.7) : Math.min(0, v.pitch); v.pitch += THREE.MathUtils.clamp(tp - v.pitch, -1 * dt, 1 * dt);
+      const d = new THREE.Vector3(0, 0, -1).applyEuler(new THREE.Euler(v.pitch, v.yaw, 0, 'YXZ')); const n = v.pos.clone().addScaledVector(d, v.speed * dt);
+      if (!lift) n.y -= (v.pos.y > 0.9 ? 6 : 0) * dt; n.y = Math.min(n.y, K.ceiling);
+      const half = this.map.size / 2 - 4; if (Math.abs(n.x) > half || Math.abs(n.z) > half) { v.yaw += Math.PI * dt; n.x = THREE.MathUtils.clamp(n.x, -half, half); n.z = THREE.MathUtils.clamp(n.z, -half, half); }
+      if (n.y < 0.8) { if (v.pitch < -0.25 && v.speed > 25) { this.hurtVehicle(v, 9999, null, true); return; } n.y = 0.8; v.pitch = Math.max(0, v.pitch); }
+      if (this.airHit(v, n)) { this.hurtVehicle(v, 9999, null, true); return; }
+      v.pos.copy(n);
+    }
+    const lim = this.map.size / 2 - 3; v.pos.x = THREE.MathUtils.clamp(v.pos.x, -lim, lim); v.pos.z = THREE.MathUtils.clamp(v.pos.z, -lim, lim);
+  }
+  airHit(v, n) { for (const s of this.solids) if (s !== v.solid && n.x > s.min.x - 1 && n.x < s.max.x + 1 && n.z > s.min.z - 1 && n.z < s.max.z + 1 && n.y > s.min.y - 0.5 && n.y < s.max.y + 0.5) return true; return false; }
+  vfire(v, i, c, shooter) {
+    const w = v.K.weapons[i]; if (v.cd[i] > 0) return; if (w.ammoMax && v.ammo[i] < 1) return; v.cd[i] = w.cd || 60 / w.rpm; if (w.ammoMax) v.ammo[i]--;
+    const src = shooter || v.seats[0].unit || { team: v.team, name: v.K.name };
+    if (w.key === 'stomp') { this.explode(v.pos, w.dmg, w.splash, src, true); if (src.isPlayer) this.hooks.toast('STOMP'); return; }
+    const muzzle = v.pos.clone(); muzzle.y += v.K.eye + (v.K.mode === 'heli' || v.K.mode === 'jet' ? -0.6 : 0);
+    let h;
+    if (src.isPlayer) { this.aimRay(w.spread || 0.002); h = this.firstHit(src); }
+    else { const d = c.aimDir.clone(); d.x += (Math.random() - 0.5) * (w.spread || 0.01) * 4; d.y += (Math.random() - 0.5) * (w.spread || 0.01) * 4; d.normalize(); this.ray.set(muzzle, d); this.ray.far = w.range * 1.5; h = this.firstHit(src); }
+    const end = h ? h.point : muzzle.clone().addScaledVector(this.ray.ray.direction, 150); this.tracer(muzzle, end);
+    if (h && h.distance < w.range * 1.5) { if (w.splash) this.explode(h.point, w.dmg, w.splash, src); else this.damageAt(h, w.dmg, src, h.object.userData.head); }
+    if (src.isPlayer && v.K.mode !== 'jet' && v.K.mode !== 'heli') this.recoilP += w.splash ? 0.02 : 0.002;
+  }
+  smoke(v) { const s = new THREE.Mesh(new THREE.SphereGeometry(0.5, 6, 4), new THREE.MeshBasicMaterial({ color: 0x333333, transparent: true, opacity: 0.6, depthWrite: false }));
+    s.position.copy(v.pos); s.position.y += v.K.h; this.scene.add(s); let t = 0; const st = () => { t += 0.03; s.position.y += 0.06; s.scale.setScalar(1 + t * 3); s.material.opacity = 0.6 * (1 - t); if (t < 1 && this.scene) requestAnimationFrame(st); else this.scene?.remove(s); }; st(); }
+  playerCtrl() { return { mx: input.move.x, my: input.move.y, aimYaw: this.player.yaw, aimPitch: this.player.pitch, up: input.jump, down: input.sprint || consumeHeld('KeyC'), fire: input.fire, alt: input.ads, special: consume('KeyG', 'btn_edit') }; }
   pilot(v, dt) {
-    const P = this.player, K = v.K;
-    const fx = -Math.sin(P.yaw), fz = -Math.cos(P.yaw), rx = Math.cos(P.yaw), rz = -Math.sin(P.yaw);
-    let mx, mz;
-    if (v.kind === 'tank') { v.yaw -= input.move.x * K.turn * dt; const s = input.move.y * K.speed * dt; mx = -Math.sin(v.yaw) * s; mz = -Math.cos(v.yaw) * s; v.aimYaw = P.yaw - v.yaw; }
-    else { v.yaw = P.yaw; mx = (fx * input.move.y + rx * input.move.x) * K.speed * dt; mz = (fz * input.move.y + rz * input.move.x) * K.speed * dt; }
-    v.vy = v.vy || 0; this.moveUnit(v, mx, mz, dt, false); syncSolid(v); P.pos.copy(v.pos);
-    const parts = v.mesh.userData.parts; v.mesh.position.copy(v.pos); v.mesh.rotation.y = v.yaw;
-    if (parts.legs) { v.walk += Math.hypot(mx, mz) * 1.6; parts.legs[0].rotation.x = Math.sin(v.walk) * 0.5; parts.legs[1].rotation.x = -Math.sin(v.walk) * 0.5; parts.torso.rotation.x = P.pitch * 0.3; }
-    if (parts.turret) { parts.turret.rotation.y = v.aimYaw; parts.barrel.rotation.x = Math.max(-0.1, P.pitch) * 0.5; }
-    v.cd = v.cd.map(c => c - dt); K.weapons.forEach((w, i) => { if (w.regen && v.ammo[i] < w.ammoMax) v.ammo[i] = Math.min(w.ammoMax, v.ammo[i] + dt / w.regen); });
-    const shoot = (i) => { const w = K.weapons[i]; if (v.cd[i] > 0) return; if (w.ammoMax && v.ammo[i] < 1) return; v.cd[i] = w.cd || 60 / w.rpm; if (w.ammoMax) v.ammo[i]--;
-      if (w.key === 'stomp') { this.explode(v.pos, w.dmg, w.splash, P, true); this.hooks.toast('STOMP'); return; }
-      this.aimRay(w.spread || 0.002); const h = this.firstHit(P); const muzzle = v.pos.clone(); muzzle.y += K.eye;
-      const end = h ? h.point : this.camera.position.clone().addScaledVector(this.ray.ray.direction, 150); this.tracer(muzzle, end);
-      if (h && h.distance < w.range * 1.5) { if (w.splash) this.explode(h.point, w.dmg, w.splash, P); else this.damageAt(h, w.dmg, P, h.object.userData.head); }
-      this.recoilP += w.splash ? 0.03 : 0.003; };
-    if (input.fire) shoot(0);
-    if (input.ads) shoot(1);
-    if (K.weapons[2] && consume('KeyG', 'btn_edit')) shoot(2);
+    const seat = this.seatOf(this.player);
+    if (seat.role === 'gunner') { seat.aimYaw = this.player.yaw; v.cd = v.cd.map(t => t); if (input.fire) this.vfire(v, 0, {}, this.player); if (input.ads && v.K.weapons[1]) this.vfire(v, 1, {}, this.player);
+      if (!v.seats[0].unit) this.drive(v, { mx: 0, my: 0, aimYaw: v.yaw, aimPitch: 0 }, dt); return; }
+    const c = this.playerCtrl(); if (v.K.mode === 'car' && v.seats[1].unit && !v.seats[1].unit.isPlayer) this.botGunner(v, v.seats[1], dt);
+    this.drive(v, c, dt);
+  }
+  // Bot vehicle AI: drivers steer toward enemies and fire; gunners track the nearest visible enemy.
+  botGunner(v, seat, dt) {
+    const u = seat.unit; let best = null, bd = 90; for (const e of this.units) if (e.alive && e.team !== v.team) { const d = e.pos.distanceTo(v.pos); if (d < bd && this.canSee(u, e) === true) { bd = d; best = e; } }
+    if (!best) return; const d = best.pos.clone().add(new THREE.Vector3(0, 1.2, 0)).sub(v.pos.clone().setY(v.pos.y + v.K.eye)); seat.aimYaw = Math.atan2(-d.x, -d.z);
+    v.gcd = (v.gcd || 0) - dt; if (v.gcd <= 0) { v.gcd = 60 / v.K.weapons[0].rpm * 1.8; v.cd[0] = 0; this.vfire(v, 0, { aimDir: d.normalize() }, u); }
+  }
+  botDrive(u, dt) {
+    const v = u.vehicle, seat = this.seatOf(u);
+    if (seat.role === 'gunner') { this.botGunner(v, seat, dt); if (!v.seats[0].unit) this.drive(v, { mx: 0, my: 0, aimYaw: v.yaw, aimPitch: 0 }, dt); return; }
+    u.think -= dt; if (u.think <= 0) { u.think = 0.5; let best = null, bd = v.K.mode === 'jet' ? 200 : 120;
+      for (const e of this.units) if (e.alive && e.team !== u.team) { const d = e.pos.distanceTo(v.pos); if (d < bd && this.canSee(u, e) === true) { bd = d; best = e; } }
+      u.target = best; if (!best && (!u.wp || v.pos.distanceTo(u.wp) < 8 || Math.random() < 0.05)) { const cp = this.capPoints?.filter(p => p.owner !== u.team); const tgt = cp && cp.length ? cp[Math.floor(Math.random() * cp.length)] : null;
+        const h = this.map.size / 2 - 10; u.wp = tgt ? new THREE.Vector3(tgt.x, 0, tgt.z) : new THREE.Vector3((Math.random() - 0.5) * h * 2, 0, (Math.random() - 0.5) * h * 2);
+        if (v.K.mode === 'boat') { const w = this.layout.water[Math.floor(Math.random() * this.layout.water.length)]; u.wp.set(THREE.MathUtils.lerp(w[0], w[1], Math.random()), 0, THREE.MathUtils.lerp(w[2], w[3], Math.random())); } } }
+    const tp = u.target?.alive ? u.target.pos : u.wp; const d = tp.clone().sub(v.pos); const flat = Math.hypot(d.x, d.z); const yaw = Math.atan2(-d.x, -d.z);
+    const aimDir = u.target?.alive ? u.target.pos.clone().add(new THREE.Vector3(0, 1, 0)).sub(v.pos.clone().setY(v.pos.y + v.K.eye)).normalize() : null;
+    const dyaw = ((yaw - v.yaw + Math.PI * 3) % (Math.PI * 2)) - Math.PI, mode = v.K.mode, c = { mx: 0, my: 0, aimYaw: yaw, aimPitch: 0, aimDir, fire: false, alt: false };
+    if (mode === 'walker') { c.my = flat > 25 ? 1 : 0; c.mx = u.target ? Math.sin(performance.now() / 1500 + u.id) : 0; }
+    else if (mode === 'tracked' || mode === 'car' || mode === 'boat') { c.mx = THREE.MathUtils.clamp(-dyaw * 2, -1, 1); c.my = flat > (u.target ? 30 : 6) ? (Math.abs(dyaw) > 1.8 ? -0.5 : 1) : 0; if (mode === 'car' && u.target) c.my = flat > 15 ? 1 : 0.4; }
+    else if (mode === 'heli') { c.my = v.pos.y < 12 ? 0 : flat > 40 ? 1 : flat < 20 ? -0.4 : 0; c.up = v.pos.y < 18; c.down = v.pos.y > 24; }
+    else if (mode === 'jet') { c.my = 1; const alt = u.target?.alive ? u.target.pos.y + 25 : 40; c.aimPitch = THREE.MathUtils.clamp((alt - v.pos.y) * 0.03, -0.5, 0.5); if (u.target && flat < 120 && v.pos.y > 30) c.aimPitch = Math.max(-0.35, Math.atan2(d.y - 0.5, flat)); if (v.pos.y < 35 && c.aimPitch < 0) c.aimPitch = 0.25; if (v.pos.y < 20) c.aimPitch = 0.4; }
+    if (aimDir) { const fwd = new THREE.Vector3(-Math.sin(v.yaw), 0, -Math.cos(v.yaw)); const facing = mode === 'tracked' || mode === 'walker' || mode === 'heli' ? true : fwd.dot(new THREE.Vector3(aimDir.x, 0, aimDir.z).normalize()) > 0.93;
+      if (facing && mode !== 'car') { u.vcd = (u.vcd || 0) - dt; if (u.vcd <= 0) { u.vcd = 0.12; c.fire = Math.random() < 0.6; c.alt = Math.random() < 0.08; } } }
+    if (mode === 'car' && v.seats[1].unit) this.botGunner(v, v.seats[1], dt);
+    this.drive(v, c, dt);
   }
   explode(pt, dmg, r, src, ground) {
     const fx = new THREE.Mesh(new THREE.SphereGeometry(r * 0.5, 10, 6), new THREE.MeshBasicMaterial({ color: 0xffa040, transparent: true, opacity: 0.7 }));
@@ -497,6 +601,18 @@ export class Game {
     for (const v of this.vehicles) if (v.alive && v.team !== src.team) { const d = v.pos.distanceTo(pt); if (d < r + 1.5) this.hurtVehicle(v, dmg * 0.8, src); }
     for (const b of this.builds.slice()) { if (b.mesh.position.distanceTo(pt) < r + 1) { b.hp -= dmg * 1.5; if (b.hp <= 0) this.removeBuild(b); } }
   }
+  // Capture points (Conquest): stand in the ring to flip it; each held point ticks score for its team.
+  updateCaps(dt) {
+    if (!this.capPoints.length) return; this.capTick += dt; const tick = this.capTick >= 3; if (tick) this.capTick = 0;
+    for (const c of this.capPoints) {
+      let n0 = 0, n1 = 0; for (const u of this.units) if (u.alive && Math.hypot(u.pos.x - c.x, u.pos.z - c.z) < 8 && u.pos.y < 6) u.team ? n1++ : n0++;
+      const push = (n0 - n1) * 0.12 * dt; const before = c.owner;
+      if (push) { c.prog = THREE.MathUtils.clamp(c.prog + push, -1, 1); if (c.prog >= 1) c.owner = 0; else if (c.prog <= -1) c.owner = 1; else if ((c.owner === 0 && c.prog < 0) || (c.owner === 1 && c.prog > 0)) c.owner = -1; }
+      if (before !== c.owner && (n0 && this.player.team === 0 && Math.hypot(this.player.pos.x - c.x, this.player.pos.z - c.z) < 8)) { this.hooks.toast(c.owner === 0 ? `Captured ${c.n} ${c.name} +200 XP` : `${c.n} neutralized`); if (c.owner === 0) this.stats.caps = (this.stats.caps || 0) + 1; }
+      const col = c.owner === 0 ? 0x4f8fff : c.owner === 1 ? 0xff6a4a : 0xffffff; c.flag.material.color.set(col); c.ring.material.color.set(col);
+      if (tick && c.owner >= 0) { this.score[c.owner]++; if (this.score[c.owner] >= this.map.scoreLimit) this.end(); }
+    }
+  }
   shieldPop(u) {
     if (u.isPlayer) { this.hooks.shieldPop(); return; }
     const fx = new THREE.Mesh(new THREE.SphereGeometry(1.1, 10, 8), new THREE.MeshBasicMaterial({ color: 0x7fd8ff, transparent: true, opacity: 0.55, depthWrite: false }));
@@ -504,14 +620,14 @@ export class Game {
   }
   regenShields(dt) { for (const u of this.units) if (u.alive) { u.shT += dt; if (u.shT > 4 && u.sh < u.maxSh) { const was = u.sh; u.sh = Math.min(u.maxSh, u.sh + 35 * dt); if (u.isPlayer && was === 0) this.hooks.toast('Shield recharging'); } } }
   hurtVehicle(v, dmg, src) {
-    if (!v.alive || (src && src.team === v.team)) return; v.hp -= dmg; if (src?.isPlayer) this.hooks.hitmark(false);
+    if (!v.alive || (src && src.team === v.team && !arguments[3])) return; v.hp -= dmg; if (src?.isPlayer) this.hooks.hitmark(false);
     if (v.seats.some(s => s.unit === this.player)) this.hooks.hurt();
     if (v.hp <= 0) { v.alive = false; v.respawn = 30; v.mesh.visible = false; this.solids = this.solids.filter(s => s !== v.solid);
-      for (const s of v.seats) if (s.unit) { const u = s.unit; s.unit = null; u.vehicle = null; u.hp = Math.min(u.hp, 50); if (u === this.player) { this.selectSlot(this.slot); this.hooks.toast(`${v.K.name} destroyed!`); } }
-      this.explode(v.pos.clone().setY(v.pos.y + 1), 60, 5, src || v); if (src?.isPlayer) { this.stats.kills++; this.hooks.toast(`${v.K.name} destroyed +100 XP`); } }
+      for (const s of v.seats) if (s.unit) { const u = s.unit; s.unit = null; u.vehicle = null; u.hp = Math.min(u.hp, 50); u.sh = 0; u.pos.y = 0; if (u.mesh) u.mesh.visible = true; if (v.K.mode === 'jet' || v.K.mode === 'heli') { u.vehicle = null; this.hurt(u, 9999, src || u, false); } if (u === this.player) { this.selectSlot(this.slot); this.hooks.toast(`${v.K.name} destroyed!`); } }
+      this.explode(v.pos.clone().setY(v.pos.y + 1), 60, 5, src || { team: -1, name: v.K.name }); if (src?.isPlayer) { this.stats.kills++; this.hooks.toast(`${v.K.name} destroyed +100 XP`); } }
     this.hooks.hud(this);
   }
-  respawnVehicle(v) { v.alive = true; v.hp = v.K.hp; v.pos.set(v.home[0], 0, v.home[1]); v.yaw = v.team === 0 ? 0 : Math.PI; v.mesh.visible = true; v.mesh.position.copy(v.pos); v.mesh.rotation.y = v.yaw; syncSolid(v); this.solids.push(v.solid); }
+  respawnVehicle(v) { v.alive = true; v.hp = v.K.hp; v.speed = 0; v.pitch = v.roll = 0; v.vy = 0; v.pos.set(v.home[0], v.kind === 'jet' ? 0.8 : v.kind === 'heli' ? 1.2 : 0, v.home[1]); v.yaw = v.team === 0 ? 0 : Math.PI; v.mesh.visible = true; v.mesh.position.copy(v.pos); v.mesh.rotation.set(0, v.yaw, 0); syncSolid(v); this.solids.push(v.solid); }
   snapshot() { // network-ready state: what a server would broadcast each tick
     return { tick: this.tickNo, score: this.score, time: this.timeLeft, vehicles: this.vehicles.map(v => ({ id: v.id, kind: v.kind, x: v.pos.x, z: v.pos.z, yaw: v.yaw, hp: v.hp, seats: v.seats.map(s => s.unit?.id || 0) })),
       units: this.units.map(u => ({ id: u.id, team: u.team, x: u.pos.x, y: u.pos.y, z: u.pos.z, yaw: u.yaw, hp: u.hp, alive: u.alive })),
@@ -519,8 +635,8 @@ export class Game {
   }
   end() {
     if (this.over) return; this.over = true; this.running = false; document.exitPointerLock?.();
-    const won = this.score[0] > this.score[1], s = this.stats, big = this.map.type === 'large' ? 1.3 : 1;
-    const xp = Math.round((s.kills * 100 + s.head * 50 + Math.round(s.dmg / 10) + s.builds * 2 + (won ? 500 : 150)) * big);
+    const won = this.score[0] > this.score[1], s = this.stats, big = this.map.type === 'war' ? 1.6 : this.map.type === 'large' ? 1.3 : 1;
+    const xp = Math.round(((s.caps || 0) * 200 + s.kills * 100 + s.head * 50 + Math.round(s.dmg / 10) + s.builds * 2 + (won ? 500 : 150)) * big);
     const gp = Math.round((s.kills * 25 + s.head * 10 + (won ? 300 : 100)) * big);
     this.hooks.end({ won, xp, gp, stats: s, score: this.score.slice() });
   }
