@@ -41,4 +41,28 @@ export const MAPS = {
         ['boat', -60, 14 * s, t], ['boat', 60, 14 * s, t], ['boat', -135, 100 * s, t], ['heli', -60, 140 * s, t], ['jet', 78, 122 * s, t]);
       return { boxes: b, trees, rocks, water, caps, spawns: [[0, 132], [0, -132]], vehicles: V, racks: [['lr50', 0, 6], ['tg7', -85, 66], ['tg7', 95, -64], ['bm12', 95, 76], ['hx2', -85, -54]] }; },
   },
+  gravewatch: {
+    name: 'Gravewatch Abbey', type: 'zombies', mode: 'Zombies', desc: 'Ruined abbey at night. Survive escalating rounds, buy doors, guns, drinks, and forge your weapon.',
+    size: 92, teamSize: 4, scoreLimit: 1e9, time: 1e9, ground: 0x3b3a2f, sky: 0x1b1f27,
+    gen() { const r = rng(13), H = 4, b = [];
+      // walls: z=15 line with door gaps at x=-25/25; x=-10/10 lines (z<15) with debris gaps at z=-15
+      b.push([-36, 15, 18, 0.8, H, 'concrete'], [0, 15, 46, 0.8, H, 'concrete'], [36, 15, 18, 0.8, H, 'concrete']);
+      for (const x of [-10, 10]) b.push([x, -31, 0.8, 28, H, 'concrete'], [x, 1, 0.8, 28, H, 'concrete']);
+      // cover: pews, crates, tombstones
+      for (let i = 0; i < 6; i++) b.push([-28 + (i % 2) * 8, -8 - Math.floor(i / 2) * 9, 5, 0.8, 1, 'wood']);
+      for (let i = 0; i < 8; i++) b.push([(r() - 0.5) * 70, 22 + r() * 18, 0.6, 1.2, 1.1, 'concrete']);
+      for (let i = 0; i < 6; i++) b.push([18 + r() * 22, -40 + r() * 50, 1.6, 1.6, 1.4, 'wood']);
+      const trees = [[-40, 42], [40, 41], [-42, 24], [43, 26], [0, 43]], rocks = [];
+      return { boxes: b, trees, rocks, spawns: [[0, 30], [0, -30]],
+        z: {
+          doors: [{ x: -25, z: 15, w: 4, d: 0.8, cost: 750, name: 'Chapel Door', zone: 'west' }, { x: 25, z: 15, w: 4, d: 0.8, cost: 750, name: 'Workshop Door', zone: 'east' },
+            { x: -10, z: -15, w: 0.8, d: 4, cost: 1250, name: 'Rubble', zone: 'center', debris: true }, { x: 10, z: -15, w: 0.8, d: 4, cost: 1250, name: 'Rubble', zone: 'center', debris: true }],
+          spawns: { start: [[-42, 43], [42, 43], [0, 44], [-43, 19], [43, 19]], west: [[-42, -42], [-42, 0], [-22, -43]], east: [[42, -42], [42, 0], [22, -43]], center: [[0, -43], [-6, -30], [6, -30]] },
+          stations: [
+            { kind: 'wall', gun: 'kr4', cost: 1000, x: -15, z: 45.4, face: 0 }, { kind: 'wall', gun: 'hx2', cost: 1200, x: 15, z: 45.4, face: 0 },
+            { kind: 'wall', gun: 'bm12', cost: 1500, x: -45.4, z: -20, face: 1 }, { kind: 'wall', gun: 'lr50', cost: 2000, x: 45.4, z: -20, face: 1 }, { kind: 'wall', gun: 'tg7', cost: 3000, x: 0, z: -45.4, face: 0 },
+            { kind: 'perk', perk: 'ironclad', x: 36, z: 38 }, { kind: 'perk', perk: 'quickdraw', x: -36, z: -2 }, { kind: 'perk', perk: 'doubletap', x: 36, z: -4 }, { kind: 'perk', perk: 'swiftstep', x: 36, z: -32 }, { kind: 'perk', perk: 'secondchance', x: -5, z: -8 },
+            { kind: 'box', cost: 950, x: -30, z: -36 }, { kind: 'forge', cost: 5000, x: 4, z: -36 },
+          ] } }; },
+  },
 };

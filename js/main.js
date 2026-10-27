@@ -25,12 +25,13 @@ const hooks = {
   hud(g) {
     $('gyroHint').classList.toggle('hidden', !(gyro.on && gyro.active && gyro.portrait));
     const P = g.player, w = g.slots[g.slot];
-    $('sc0').textContent = g.score[0]; $('sc1').textContent = g.score[1];
-    const t = Math.max(0, Math.ceil(g.timeLeft)); $('timer').textContent = `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`;
+    if (g.z) { $('sc0').textContent = 'R' + g.z.round; $('sc1').textContent = g.z.alive + g.z.toSpawn; $('goal').textContent = `${g.map.name} · Zombies · Round ${g.z.round} · ${g.z.alive + g.z.toSpawn} left`; }
+    else { $('sc0').textContent = g.score[0]; $('sc1').textContent = g.score[1]; }
+    const t = Math.max(0, Math.ceil(g.timeLeft)); $('timer').textContent = g.z ? `${g.z.pts} pts${g.z.insta > 0 ? ' · INSTA ' + Math.ceil(g.z.insta) : ''}${g.z.dbl > 0 ? ' · 2X ' + Math.ceil(g.z.dbl) : ''}` : `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`;
     $('shfill').style.width = Math.max(0, P.sh / P.maxSh * 100) + '%'; $('shbar').classList.toggle('low', P.sh < P.maxSh * 0.25);
     $('hpfill').style.width = Math.max(0, P.hp / P.maxHp * 100) + '%'; $('hptext').textContent = Math.max(0, Math.ceil(P.hp));
     $('wname').textContent = w.pick ? 'Breacher Pick' : w.name;
-    $('ammo').textContent = w.pick ? '—' : w.reloading > 0 ? 'RELOAD' : `${w.ammo} / ${w.mag}`;
+    $('ammo').textContent = w.pick ? '—' : w.reloading > 0 ? 'RELOAD' : w.reserve !== undefined ? `${w.ammo} | ${w.reserve}` : `${w.ammo} / ${w.mag}`;
     $('mats').textContent = `Wood ${g.mats.wood} · Stone ${g.mats.stone} · ${g.nadeType === 'frag' ? '▶' : ''}Frag ${P.nades.frag} ${g.nadeType === 'plasma' ? '▶' : ''}Plasma ${P.nades.plasma}`;
     if (g.skill) { const k = g.skill; $('skill').textContent = `[${matchMedia('(pointer: coarse)').matches ? 'SKILL' : 'H'}] ${k.name}: ${k.t > 0 ? 'ACTIVE ' + Math.ceil(k.t) + 's' : k.cdT > 0 ? Math.ceil(k.cdT) + 's' : 'READY'}`; $('skill').classList.toggle('ready', !k.cdT); }
     document.body.classList.toggle('cloaked', g.player.cloakT > 0);
@@ -41,7 +42,7 @@ const hooks = {
     $('caps').innerHTML = g.capPoints.map(c => `<span class="cap o${c.owner}">${c.n}</span>`).join('');
     $('prompt').textContent = g.near ? `${matchMedia('(pointer: coarse)').matches ? 'Tap ENTER' : 'Press F'} to pilot ${g.near.K.name}` : g.nearPick ? `${matchMedia('(pointer: coarse)').matches ? 'Tap ENTER' : 'Press F'} to swap for ${GUNS[g.nearPick.id].name}` : g.nearChest ? `${matchMedia('(pointer: coarse)').matches ? 'Tap ENTER' : 'Press F'} to open chest` : (g.zPrompt || '');
     $('dead').classList.toggle('hidden', P.alive);
-    $('goal').textContent = `${g.map.name} · ${g.mode === 'coop' ? 'Co-op vs Bots' : g.map.mode}${g.capPoints.length ? ' (hold points)' : ''} · first to ${g.map.scoreLimit}`;
+    $('goal').textContent = g.z ? `${g.map.name} · Zombies · Round ${g.z.round} · ${g.z.alive + g.z.toSpawn} left` : `${g.map.name} · ${g.mode === 'coop' ? 'Co-op vs Bots' : g.map.mode}${g.capPoints.length ? ' (hold points)' : ''} · first to ${g.map.scoreLimit}`;
   },
   tracker(g) {
     const c = $('tracker'), x = c.getContext('2d'), R = c.width / 2, range = 25, P = g.player; x.clearRect(0, 0, c.width, c.height);
@@ -119,11 +120,12 @@ function drawMap(g, c, full) {
 }
 function applyResult(r) {
   $('spawnsel').classList.add('hidden'); $('spawnsel').dataset.k = '';
+  if (r.zombies) { S.zbest = Math.max(S.zbest || 0, r.round); S.ztotal = (S.ztotal || 0) + r.round; }
   S.xp += r.xp; S.gp += r.gp; S.totals.kills += r.stats.kills; S.totals.deaths += r.stats.deaths; S.totals.matches++; if (r.won) S.totals.wins++;
   const before = S.rank; while (S.rank < RANKS.length - 1 && S.xp >= xpForRank(S.rank)) { S.rank++; S.points += 1; S.gp += 250; }
   save(S);
-  $('rtitle').textContent = r.won ? 'VICTORY' : 'DEFEAT';
-  $('rbody').innerHTML = `<p>Score ${r.score[0]} – ${r.score[1]}</p><p>Kills ${r.stats.kills} · Deaths ${r.stats.deaths} · Headshots ${r.stats.head} · Builds ${r.stats.builds}</p>
+  $('rtitle').textContent = r.zombies ? `SURVIVED ${Math.max(0, r.round - 1)} ROUND${r.round === 2 ? '' : 'S'}` : r.won ? 'VICTORY' : 'DEFEAT';
+  $('rbody').innerHTML = `<p>${r.zombies ? `Reached round ${r.round} · Best ${S.zbest}` : `Score ${r.score[0]} – ${r.score[1]}`}</p><p>Kills ${r.stats.kills} · Deaths ${r.stats.deaths} · Headshots ${r.stats.head} · Builds ${r.stats.builds}</p>
     <p><b>+${r.xp} XP</b> · <b>+${r.gp} GP</b></p>${S.rank > before ? `<h3>RANK UP! You are now ${RANKS[S.rank]}</h3><p>+${S.rank - before} stat point(s), +${(S.rank - before) * 250} GP bonus</p>` : ''}`;
   show('results');
 }
@@ -139,7 +141,7 @@ function render(id) {
   if (id === 'menu') $('profile').innerHTML = rankHtml();
   if (id === 'play') {
     document.querySelectorAll('#modes button').forEach(b => { b.classList.toggle('on', b.dataset.mode === mode); b.onclick = () => { mode = b.dataset.mode; render('play'); }; });
-    $('maps').innerHTML = Object.entries(MAPS).map(([k, m]) => `<button class="card" data-map="${k}"><span class="tag">${{ small: 'SMALL · QUICK', large: 'ARENA · BIG BATTLE', war: 'FULL-SCALE · LAND, SEA & AIR' }[m.type]}</span><b>${m.name}</b><small>${m.desc} ${m.teamSize}v${mode === 'coop' ? Math.round(m.teamSize * 1.5) : m.teamSize}, first to ${m.scoreLimit}, ${m.time / 60} min</small></button>`).join('');
+    $('maps').innerHTML = Object.entries(MAPS).filter(([k, m]) => (m.type === 'zombies') === (mode === 'zombies')).map(([k, m]) => `<button class="card" data-map="${k}"><span class="tag">${{ small: 'SMALL · QUICK', large: 'ARENA · BIG BATTLE', war: 'FULL-SCALE · LAND, SEA & AIR', zombies: 'ZOMBIES · ROUND SURVIVAL' }[m.type]}</span><b>${m.name}</b><small>${m.type === 'zombies' ? `${m.desc} You + ${m.teamSize - 1} bot squadmates. Best: round ${S.zbest || 0}` : `${m.desc} ${m.teamSize}v${mode === 'coop' ? Math.round(m.teamSize * 1.5) : m.teamSize}, first to ${m.scoreLimit}, ${m.time / 60} min`}</small></button>`).join('');
     document.querySelectorAll('[data-map]').forEach(b => b.onclick = () => startMatch(b.dataset.map));
   }
   if (id === 'armory') renderShop();

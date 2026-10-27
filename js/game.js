@@ -6,6 +6,7 @@ import { Nav } from './nav.js';
 import { RARITY, ELEMENTS, genGun } from './loot.js';
 import { BACKPACK } from './save.js';
 import { CLASSES, lv } from './classes.js';
+import { installZombies } from './zombies.js';
 import { KINDS, createVehicle, syncSolid } from './vehicles.js';
 import { input, pollKeys, consume, endFrame, consumeHeld } from './input.js';
 
@@ -74,7 +75,7 @@ export class Game {
     this.camera.far = this.tier === 'low' ? Math.min(220, M.size * 1.4) : 600; this.camera.updateProjectionMatrix();
     for (let i = 1; i < this.teamSize; i++) this.makeUnit(0, false, BOT_NAMES[i % BOT_NAMES.length]);
     const foes = mode === 'coop' ? Math.round(this.teamSize * 1.5) : this.teamSize; // co-op: your bot squad vs a larger, sharper enemy force
-    for (let i = 0; i < foes; i++) { const b = this.makeUnit(1, false, BOT_NAMES[(i + 12) % BOT_NAMES.length]); if (mode === 'coop') b.skill = Math.min(0.95, b.skill + 0.1); }
+    if (mode !== 'zombies') for (let i = 0; i < foes; i++) { const b = this.makeUnit(1, false, BOT_NAMES[(i + 12) % BOT_NAMES.length]); if (mode === 'coop') b.skill = Math.min(0.95, b.skill + 0.1); }
     this.units.forEach(u => this.spawn(u));
     this.pickups = []; this.racks = (L.racks || []).map(([id, x, z]) => ({ id, x, z, t: 0 }));
     this.nadesLive = []; this.nadeType = 'frag';
@@ -86,7 +87,8 @@ export class Game {
     this.lootDrops = []; this.chests = []; this.lastLoot = null; this.dropCap = this.tier === 'low' ? (isPhone ? 10 : 16) : 30;
     if (mode !== 'zombies') { const nC = { small: 3, large: 6, war: 9 }[M.type] || 3, hh = M.size / 2 - 6;
       for (let i = 0, tries = 0; i < nC && tries < 200; tries++) { const p = new THREE.Vector3((Math.random() - 0.5) * hh * 2, 0, (Math.random() - 0.5) * hh * 2); if (this.blocked(p) || this.isWater(p.x, p.z) || Math.abs(p.z) > hh - 8) continue; this.addChest(p); i++; } }
-    this.applyClass(); this.turrets = [];
+    this.applyClass(); this.turrets = []; this.z = null; this.zPrompt = ''; this.interact = () => this.zInteract();
+    if (mode === 'zombies') this.zSetup();
     this.nav = new Nav(this); this.selectSlot(0); this.makeGhost();
     this.running = true; this.last = performance.now(); this.hooks.hud(this);
     if (!this.loopOn) { this.loopOn = true; const loop = t => { requestAnimationFrame(loop); this.frame(t); }; requestAnimationFrame(loop); }
@@ -189,8 +191,8 @@ export class Game {
     const w = this.slots[this.slot]; this.fireT -= dt;
     if (w.pick) { if (input.fire && this.fireT <= 0) { this.fireT = 0.45; this.swing = 0.25; this.aimRay(0); this.ray.far = 3;
         const h = this.firstHit(this.player); if (h) this.damageAt(h, 30, this.player, false, true); } return; }
-    if (w.reloading > 0) { w.reloading -= dt; if (w.reloading <= 0) { w.ammo = w.mag; this.hooks.hud(this); } return; }
-    if ((consume('KeyR', 'btn_reload') || w.ammo <= 0) && w.ammo < w.mag) { w.reloading = w.reload; this.sfx('reload'); this.hooks.toast('Reloading'); return; }
+    if (w.reloading > 0) { w.reloading -= dt; if (w.reloading <= 0) { if (w.reserve !== undefined) { const t = Math.min(w.mag - w.ammo, w.reserve); w.ammo += t; w.reserve -= t; } else w.ammo = w.mag; this.hooks.hud(this); } return; }
+    if ((consume('KeyR', 'btn_reload') || w.ammo <= 0) && w.ammo < w.mag && !(w.reserve <= 0)) { w.reloading = w.reload; this.sfx('reload'); this.hooks.toast('Reloading'); return; }
     if (!input.fire || this.fireT > 0) return;
     if (!w.auto) { if (this.semiHeld) return; this.semiHeld = true; }
     this.fireT = 60 / w.rpm; w.ammo--; this.player.firedT = 1.5; this.sfx(Game.gunSound(w));
@@ -223,6 +225,7 @@ export class Game {
   hurt(u, dmg, src, head, elem) {
     if (!u.alive || u.spawnProt > 0 || (src && src.team === u.team && src !== u)) return;
     if (u.vehicle) { this.hurtVehicle(u.vehicle, dmg, src); return; }
+    if (u.downed) return; if (u.zombie) { if (this.z?.insta > 0) dmg = 1e6; this.zHit(u, src); }
     if (elem === 'shock' && u.sh > 0) dmg *= 2; else if (elem === 'fire' && u.sh <= 0) dmg *= 1.5;
     if (u.dmgTaken) dmg *= u.dmgTaken();
     if (src?.isPlayer && u !== src) this.hooks.dmgNum(u.pos, dmg * (head && u.sh <= 0 ? 2 : 1), elem, head);
@@ -232,11 +235,13 @@ export class Game {
     u.hp -= dmg; dmg += 0; if (src.isPlayer) { this.stats.dmg += dmg; this.hooks.hitmark(head); }
     if (u.isPlayer) this.hooks.hurt();
     if (!u.isPlayer && src && !u.target) u.target = src;
+    if (u.hp <= 0 && this.mode === 'zombies' && u.team === 0) { this.zDown(u); return; }
     if (u.hp <= 0) {
       if (!u.isPlayer) { if (u.team !== this.player.team && Math.random() < (this.mode === 'zombies' ? 0.04 : 0.3)) this.dropLoot(genGun(this.save.rank + 1), u.pos); else if (this.mode !== 'zombies') this.dropWeapon(u.gun.id || 'kr4', u.pos, 0.6); }
       u.alive = false; u.deaths++; u.respawn = 3; src.kills++; this.score[src.team]++;
-      if (u.mesh) u.mesh.visible = false;
-      if (src.isPlayer) { this.stats.kills++; if (head) this.stats.head++; this.hooks.toast(head ? 'HEADSHOT +150 XP' : 'Eliminated +100 XP'); }
+      if (u.mesh) u.mesh.visible = false; if (u.zombie) this.zKill(u, src, head);
+      if (src.isPlayer && u.zombie) { this.stats.kills++; if (head) this.stats.head++; }
+      else if (src.isPlayer) { this.stats.kills++; if (head) this.stats.head++; this.hooks.toast(head ? 'HEADSHOT +150 XP' : 'Eliminated +100 XP'); }
       if (u.isPlayer) { this.stats.deaths++; this.hooks.toast(`Eliminated by ${src.name}`); }
       this.hooks.feed(src, u, head);
       if (this.score[src.team] >= this.map.scoreLimit) this.end();
@@ -328,6 +333,8 @@ export class Game {
   }
   botThink(u, dt) {
     if (u.vehicle) return this.botDrive(u, dt);
+    if (u.reviveFor) { const d = u.reviveFor; if (!d.downed || !d.alive) u.reviveFor = null; else { const wp = this.pathTo(u, d.pos, 'foot'), v = wp.clone().sub(u.pos); v.y = 0; const l = v.length();
+      if (l > 1.2) { v.normalize(); u.yaw = Math.atan2(-v.x, -v.z); this.moveUnit(u, v.x * 5 * dt, v.z * 5 * dt, dt, false); } u.mesh.position.copy(u.pos); u.mesh.rotation.y = u.yaw; return; } }
     if (u.goVeh) { const v = u.goVeh; if (!v.alive || !v.seats.some(s => !s.unit)) u.goVeh = null; else if (v.pos.distanceTo(u.pos) < v.K.r + 2.5) { if (this.enterVehicle(u, v)) return; } }
     u.think -= dt; const g = u.gun;
     if (u.think <= 0) {
@@ -336,7 +343,8 @@ export class Game {
       u.target = best; u.seeT = best ? (u.seeT || 0) : 0;
       if (!best && !u.goVeh && Math.random() < 0.15) { for (const v of this.vehicles) if (v.alive && v.team === u.team && v.pos.distanceTo(u.pos) < 35 && v.seats.some(s => !s.unit) && !this.units.some(o => o.goVeh === v)) { u.goVeh = v; break; } }
       if (u.goVeh && !best) u.wp.copy(u.goVeh.pos);
-      if (!best && (u.pos.distanceTo(u.wp) < 3 || Math.random() < 0.05 || u.bumped)) {
+      if (this.z && !best && (u.pos.distanceTo(this.player.pos) > 7 || Math.random() < 0.1)) { u.wp.set(this.player.pos.x + (Math.random() - 0.5) * 8, 0, this.player.pos.z + (Math.random() - 0.5) * 8); u.bumped = false; }
+      if (!this.z && !best && (u.pos.distanceTo(u.wp) < 3 || Math.random() < 0.05 || u.bumped)) {
         const caps = this.capPoints.filter(c => c.owner !== u.team); const enemies = this.units.filter(e => e.alive && e.team !== u.team);
         const e = caps.length && Math.random() < 0.75 ? { pos: new THREE.Vector3(caps[Math.floor(Math.random() * caps.length)].x, 0, caps[Math.floor(Math.random() * caps.length)].z) } : enemies[Math.floor(Math.random() * enemies.length)];
         const h = this.map.size / 2 - 4; const sc = this.capPoints.length ? 10 : 30; u.wp.set(THREE.MathUtils.clamp((e ? e.pos.x : 0) + (Math.random() - 0.5) * sc, -h, h), 0, THREE.MathUtils.clamp((e ? e.pos.z : 0) + (Math.random() - 0.5) * sc, -h, h));
@@ -420,7 +428,7 @@ export class Game {
     if (P.alive && P.vehicle) { this.buildMode = null; this.pilot(P.vehicle, dt); }
     else if (P.alive) {
       P.spawnProt = Math.max(0, (P.spawnProt || 0) - dt);
-      const sp = 5.5 * (P.speedMul || 1) * (1 + this.save.stats.speed * 0.03) * (input.sprint && input.move.y > 0 && !input.ads ? 1.45 : 1) * (input.ads ? 0.6 : 1);
+      const sp = 5.5 * (P.speedMul || 1) * (P.zSpeed || 1) * (P.downed ? 0.25 : 1) * (1 + this.save.stats.speed * 0.03) * (input.sprint && input.move.y > 0 && !input.ads ? 1.45 : 1) * (input.ads ? 0.6 : 1);
       const fx = -Math.sin(P.yaw), fz = -Math.cos(P.yaw), rx = Math.cos(P.yaw), rz = -Math.sin(P.yaw);
       let mx = fx * input.move.y + rx * input.move.x, mz = fz * input.move.y + rz * input.move.x; const l = Math.hypot(mx, mz); if (l > 1) { mx /= l; mz /= l; }
       this.moveUnit(P, mx * sp * dt, mz * sp * dt, dt, input.jump);
@@ -448,14 +456,14 @@ export class Game {
     // view-distance LOD: skip drawing far bots
     const lod = this.tier === 'low' ? 85 : 160; for (const u of this.units) if (u.mesh && u.alive) u.mesh.visible = !u.vehicle && u.pos.distanceTo(P.pos) < lod;
     for (const v of this.vehicles) if (v.alive) v.mesh.visible = v.pos.distanceTo(P.pos) < lod * 2.2;
-    this.updateCaps(dt);
+    this.updateCaps(dt); if (this.z && !this.over) this.zUpdate(dt);
     this.updateSkill(dt); this.updateDots(dt); this.regenShields(dt); this.updateLoot(dt);
     // bots & respawns
     for (const u of this.units) {
-      if (!u.alive) { u.respawn -= dt; if (u.respawn <= 0 && !this.over) {
+      if (!u.alive) { if (u.zombie || (this.mode === 'zombies' && u.team === 0)) continue; u.respawn -= dt; if (u.respawn <= 0 && !this.over) {
         if (u.isPlayer && this.capPoints.length) { if (!this.choosing) { this.choosing = true; document.exitPointerLock?.(); this.hooks.spawnSelect(this.spawnOptions(u.team)); } else this.hooks.spawnRefresh?.(this.spawnOptions(u.team)); }
         else this.spawn(u); } continue; }
-      if (!u.isPlayer) { u.spawnProt = Math.max(0, u.spawnProt - dt); this.botThink(u, dt); }
+      if (!u.isPlayer) { u.spawnProt = Math.max(0, u.spawnProt - dt); if (u.zombie) this.zombieThink(u, dt); else if (!u.downed) this.botThink(u, dt); }
     }
     for (const tr of this.tracers) { tr.t -= dt; if (tr.t <= 0) { this.scene.remove(tr.l); tr.l.geometry.dispose(); } } this.tracers = this.tracers.filter(t => t.t > 0);
     this.hudT = (this.hudT || 0) - dt; if (this.hudT <= 0) { this.hudT = 0.2; this.hooks.hud(this); }
@@ -743,6 +751,7 @@ export class Game {
         this.sfx('smg', t.pos); this.hurt(best, 9 * t.dmgMul, P, false, 'shock'); if (Math.random() < 0.15) best.dot = { elem: 'shock', dps: 10 * t.dmgMul, t: 3, acc: 0, src: P }; } } }
   end() {
     if (this.over) return; this.over = true; this.running = false; document.exitPointerLock?.();
+    if (this.z) return this.hooks.end(this.zEnd());
     const won = this.score[0] > this.score[1], s = this.stats, big = this.map.type === 'war' ? 1.6 : this.map.type === 'large' ? 1.3 : 1;
     const xp = Math.round(((s.caps || 0) * 200 + s.kills * 100 + s.head * 50 + Math.round(s.dmg / 10) + s.builds * 2 + (won ? 500 : 150)) * big);
     const gp = Math.round((s.kills * 25 + s.head * 10 + (won ? 300 : 100)) * big);
@@ -750,3 +759,4 @@ export class Game {
   }
   dispose() { this.running = false; this.scene = null; }
 }
+installZombies(Game);
