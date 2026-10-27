@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { GUNS, ATTACH, BUILD, GRID } from './data.js';
 import { MAPS } from './maps.js';
 import { mat, makeRenderer, isPhone } from './gfx.js';
+import { Nav } from './nav.js';
 import { KINDS, createVehicle, syncSolid } from './vehicles.js';
 import { input, pollKeys, consume, endFrame, consumeHeld } from './input.js';
 
@@ -79,7 +80,7 @@ export class Game {
     const lo = this.save.loadout; this.slots = [lo.primary, lo.secondary, 'pick'].map(id => id === 'pick' ? { id, pick: true } : this.makeWeapon(id));
     this.mats = { wood: 30, stone: 0 }; this.slot = 0; this.buildMode = null; this.buildRot = 0;
     this.stats = { kills: 0, deaths: 0, head: 0, dmg: 0, builds: 0 }; this.recoilP = 0; this.fireT = 0;
-    this.selectSlot(0); this.makeGhost();
+    this.nav = new Nav(this); this.selectSlot(0); this.makeGhost();
     this.running = true; this.last = performance.now(); this.hooks.hud(this);
     if (!this.loopOn) { this.loopOn = true; const loop = t => { requestAnimationFrame(loop); this.frame(t); }; requestAnimationFrame(loop); }
   }
@@ -105,7 +106,7 @@ export class Game {
       g.add(body, legs, head, helm, gun); this.scene.add(g); u.mesh = g;
       [body, legs, gun].forEach(p => { p.castShadow = true; p.userData = { kind: 'unit', unit: u, head: false }; this.hitMeshes.push(p); });
       [head, helm].forEach(p => { p.castShadow = true; p.userData = { kind: 'unit', unit: u, head: true }; this.hitMeshes.push(p); });
-      u.gun = this.makeWeaponBot(); u.think = 0; u.target = null; u.wp = new THREE.Vector3(); u.strafe = 1; u.skill = 0.55 + Math.random() * 0.35;
+      u.gun = this.makeWeaponBot(); u.think = 0; u.target = null; u.wp = new THREE.Vector3(); u.strafe = 1; u.flanker = Math.random() < 0.35; u.skill = 0.55 + Math.random() * 0.35;
     }
     this.units.push(u); return u;
   }
@@ -205,7 +206,7 @@ export class Game {
     else if (ud.kind === 'harvest' && src.isPlayer && pick) {
       const o = ud.obj; o.userData.hp = (o.userData.hp || 120) - 30; const amt = 6 + this.save.stats.build; this.mats[ud.res] += amt;
       this.hooks.toast(`+${amt} ${ud.res}`); o.scale.multiplyScalar(0.96);
-      if (o.userData.hp <= 0) { this.scene.remove(o); this.hitMeshes = this.hitMeshes.filter(m => m.userData.obj !== o); this.solids = this.solids.filter(s => s.obj !== o); }
+      if (o.userData.hp <= 0) { this.scene.remove(o); this.hitMeshes = this.hitMeshes.filter(m => m.userData.obj !== o); this.solids = this.solids.filter(s => s.obj !== o); this.nav.dirty = true; }
       this.hooks.hud(this);
     }
   }
@@ -274,11 +275,11 @@ export class Game {
     mesh.userData = { kind: 'build', build: b }; this.hitMeshes.push(mesh);
     if (g.type === 'ramp') { b.ramp = { cx: g.x, cz: g.z, y0: g.y, dir: g.dir }; this.ramps.push(b.ramp); }
     else { b.solid = { min: new THREE.Vector3(g.x - w / 2, g.type === 'floor' ? g.y : g.y, g.z - d / 2), max: new THREE.Vector3(g.x + w / 2, g.y + h + (g.type === 'floor' ? 0 : 0), g.z + d / 2) }; this.solids.push(b.solid); }
-    this.builds.push(b); this.hooks.hud(this);
+    this.builds.push(b); this.nav.dirty = true; this.hooks.hud(this);
   }
   removeBuild(b) {
     this.scene.remove(b.mesh); this.hitMeshes = this.hitMeshes.filter(m => m !== b.mesh); this.builds = this.builds.filter(x => x !== b);
-    if (b.solid) this.solids = this.solids.filter(s => s !== b.solid); if (b.ramp) this.ramps = this.ramps.filter(r => r !== b.ramp);
+    if (b.solid) this.solids = this.solids.filter(s => s !== b.solid); this.nav.dirty = true; if (b.ramp) this.ramps = this.ramps.filter(r => r !== b.ramp);
   }
   editTarget() { // Edit: rotate ramps, open walls into doorways, or remove floors (refunds half)
     this.aimRay(0); this.ray.far = 7; const h = this.firstHit(this.player); if (!h || h.object.userData.kind !== 'build') return;
@@ -296,6 +297,21 @@ export class Game {
     if (dist > 90) return false; this.ray.set(from, d.normalize()); this.ray.far = dist;
     for (const h of this.ray.intersectObjects(this.hitMeshes, false)) { const vh = h.object.userData.vehicle; if (vh && (vh === b.vehicle || vh === a.vehicle || !vh.alive)) continue; const u = h.object.userData.unit; if (u === a || u === b || (u && !u.alive)) continue; if (u) continue; return h; }
     return true;
+  }
+  // ---- bot navigation helpers ----
+  pathTo(u, goal, mode) { // throttled A* requests; returns next waypoint (or goal)
+    u.repathT = (u.repathT || 0) - this.lastDt;
+    const far = !u.pathGoal || u.pathGoal.distanceTo(goal) > 4;
+    if ((far || u.repathT <= 0 || u.bumped) && this.navBudget > 0) { this.navBudget--; u.path = this.nav.find(u.pos, goal, mode) || []; u.pathI = 0; u.pathGoal = goal.clone(); u.repathT = 2.5 + Math.random(); u.bumped = false; }
+    const r = u.K ? 4 : 1.2; while (u.path && u.pathI < u.path.length && Math.hypot(u.path[u.pathI].x - u.pos.x, u.path[u.pathI].z - u.pos.z) < r) u.pathI++;
+    return u.path && u.pathI < u.path.length ? u.path[u.pathI] : goal;
+  }
+  losBlocked(from, to) { const d = to.clone().sub(from), L = d.length(); this.ray.set(from, d.normalize()); this.ray.far = L; for (const h of this.ray.intersectObjects(this.hitMeshes, false)) { const k = h.object.userData.kind; if (k === 'unit' || k === 'vehicle' || k === 'ground') continue; return true; } return false; }
+  findCover(u, threat) {
+    const te = threat.pos.clone(); te.y += EYE; let best = null, bd = 1e9;
+    for (let a = 0; a < 12; a++) for (const r of [4, 7, 10]) { const ang = a / 12 * Math.PI * 2, p = new THREE.Vector3(u.pos.x + Math.cos(ang) * r, 1.2, u.pos.z + Math.sin(ang) * r);
+      const k = this.nav.idx(p.x, p.z); if (!this.nav.ok(k, 'land')) continue; const d = p.distanceTo(u.pos); if (d >= bd) continue; if (this.losBlocked(te, p)) { bd = d; best = p.setY(0); } }
+    return best;
   }
   botThink(u, dt) {
     if (u.vehicle) return this.botDrive(u, dt);
@@ -338,8 +354,14 @@ export class Game {
           const to = t.pos.clone(); to.y += 1.3; to.x += (Math.random() - 0.5) * (hits ? 0.3 : 2); to.z += (Math.random() - 0.5) * (hits ? 0.3 : 2);
           this.tracer(from, to); if (hits) this.hurt(t, g.dmg * hits * (t.isPlayer ? 0.8 : 1), u, Math.random() < 0.1); }
       }
+      // cover when shield breaks; flankers swing wide instead of strafing
+      if (!u.cover && u.sh <= 0 && Math.random() < 0.5) { u.cover = this.findCover(u, t); u.coverT = 6; }
+      let goal = null;
+      if (u.cover) { goal = u.cover; u.coverT -= dt; if (u.sh >= u.maxSh * 0.8 || u.coverT <= 0) u.cover = null; }
+      else if (u.flanker && dist > 16) { const sgn = u.id % 2 ? 1 : -1; goal = t.pos.clone().add(new THREE.Vector3(Math.cos(u.yaw) * 14 * sgn, 0, -Math.sin(u.yaw) * 14 * sgn)); }
+      if (goal) { const wp = this.pathTo(u, goal, 'foot'), d2 = wp.clone().sub(u.pos); d2.y = 0; if (d2.length() > 0.4) { d2.normalize(); mx = d2.x; mz = d2.z; } }
     } else {
-      const d = u.wp.clone().sub(u.pos); d.y = 0; if (d.length() > 0.5) { d.normalize(); mx = d.x; mz = d.z; u.yaw = Math.atan2(-d.x, -d.z); }
+      const wp = this.pathTo(u, u.wp, 'foot'); const d = wp.clone().sub(u.pos); d.y = 0; if (d.length() > 0.5) { d.normalize(); mx = d.x; mz = d.z; u.yaw = Math.atan2(-d.x, -d.z); }
     }
     if (u.bumped && Math.random() < 0.05) jump = true;
     const l = Math.hypot(mx, mz); if (l > 1) { mx /= l; mz /= l; }
@@ -354,11 +376,12 @@ export class Game {
     const fdt = Math.min(0.1, (t - this.last) / 1000); this.last = t;
     if (!this.running || !this.scene) { endFrame(); return; }
     if (this.paused) { this.renderer.render(this.scene, this.camera); endFrame(); return; }
-    pollKeys(); this.acc = (this.acc || 0) + fdt; let n = 0;
+    this.navBudget = 0; pollKeys(); this.acc = (this.acc || 0) + fdt; let n = 0;
     while (this.acc >= TICK && n < 6) { this.acc -= TICK; this.tickNo = (this.tickNo || 0) + 1; this.tick(TICK, n === 0); n++; if (!this.running) break; }
     this.renderer.render(this.scene, this.camera); if (n) endFrame();
   }
   tick(dt, first) {
+    this.lastDt = dt; this.navBudget += 3;
     if (!first) { input.look.x = input.look.y = 0; } const P = this.player, w = this.slots[this.slot];
     this.timeLeft -= dt; if (this.timeLeft <= 0 && !this.over) this.end();
     // input actions
@@ -589,13 +612,20 @@ export class Game {
       u.target = best; if (!best && (!u.wp || v.pos.distanceTo(u.wp) < 8 || Math.random() < 0.05)) { const cp = this.capPoints?.filter(p => p.owner !== u.team); const tgt = cp && cp.length ? cp[Math.floor(Math.random() * cp.length)] : null;
         const h = this.map.size / 2 - 10; u.wp = tgt ? new THREE.Vector3(tgt.x, 0, tgt.z) : new THREE.Vector3((Math.random() - 0.5) * h * 2, 0, (Math.random() - 0.5) * h * 2);
         if (v.K.mode === 'boat') { const w = this.layout.water[Math.floor(Math.random() * this.layout.water.length)]; u.wp.set(THREE.MathUtils.lerp(w[0], w[1], Math.random()), 0, THREE.MathUtils.lerp(w[2], w[3], Math.random())); } } }
-    const tp = u.target?.alive ? u.target.pos : u.wp; const d = tp.clone().sub(v.pos); const flat = Math.hypot(d.x, d.z); const yaw = Math.atan2(-d.x, -d.z);
+    let tp = u.target?.alive ? u.target.pos : u.wp; const mode0 = v.K.mode;
+    if (mode0 === 'tracked' || mode0 === 'car' || mode0 === 'boat' || mode0 === 'walker') { const vu = { pos: v.pos, K: v.K, bumped: v.speed !== undefined && Math.abs(v.speed) < 0.5 && (u.stuckT = (u.stuckT || 0) + dt) > 2 }; if (vu.bumped) u.stuckT = 0;
+      Object.assign(vu, u.vnav || {}); tp = this.pathTo(vu, tp, mode0 === 'boat' ? 'boat' : 'land'); u.vnav = { path: vu.path, pathI: vu.pathI, pathGoal: vu.pathGoal, repathT: vu.repathT }; }
+    const d = tp.clone().sub(v.pos); const flat = Math.hypot(d.x, d.z); const yaw = Math.atan2(-d.x, -d.z);
     const aimDir = u.target?.alive ? u.target.pos.clone().add(new THREE.Vector3(0, 1, 0)).sub(v.pos.clone().setY(v.pos.y + v.K.eye)).normalize() : null;
     const dyaw = ((yaw - v.yaw + Math.PI * 3) % (Math.PI * 2)) - Math.PI, mode = v.K.mode, c = { mx: 0, my: 0, aimYaw: yaw, aimPitch: 0, aimDir, fire: false, alt: false };
     if (mode === 'walker') { c.my = flat > 25 ? 1 : 0; c.mx = u.target ? Math.sin(performance.now() / 1500 + u.id) : 0; }
     else if (mode === 'tracked' || mode === 'car' || mode === 'boat') { c.mx = THREE.MathUtils.clamp(-dyaw * 2, -1, 1); c.my = flat > (u.target ? 30 : 6) ? (Math.abs(dyaw) > 1.8 ? -0.5 : 1) : 0; if (mode === 'car' && u.target) c.my = flat > 15 ? 1 : 0.4; }
-    else if (mode === 'heli') { c.my = v.pos.y < 12 ? 0 : flat > 40 ? 1 : flat < 20 ? -0.4 : 0; c.up = v.pos.y < 18; c.down = v.pos.y > 24; }
-    else if (mode === 'jet') { c.my = 1; const alt = u.target?.alive ? u.target.pos.y + 25 : 40; c.aimPitch = THREE.MathUtils.clamp((alt - v.pos.y) * 0.03, -0.5, 0.5); if (u.target && flat < 120 && v.pos.y > 30) c.aimPitch = Math.max(-0.35, Math.atan2(d.y - 0.5, flat)); if (v.pos.y < 35 && c.aimPitch < 0) c.aimPitch = 0.25; if (v.pos.y < 20) c.aimPitch = 0.4; }
+    else if (mode === 'heli') { c.my = v.pos.y < 12 ? 0 : flat > 40 ? 1 : flat < 20 ? -0.4 : 0; c.up = v.pos.y < 18; c.down = v.pos.y > 24; const ah = v.pos.clone().add(new THREE.Vector3(-Math.sin(v.yaw) * 12, 0, -Math.cos(v.yaw) * 12)); if (this.airHit(v, ah)) { c.up = true; c.down = false; c.my = 0; } }
+    else if (mode === 'jet') { c.my = 1; const alt = u.target?.alive ? u.target.pos.y + 25 : 40; c.aimPitch = THREE.MathUtils.clamp((alt - v.pos.y) * 0.03, -0.5, 0.5); if (u.target && flat < 120 && v.pos.y > 30) c.aimPitch = Math.max(-0.35, Math.atan2(d.y - 0.5, flat)); if (v.pos.y < 35 && c.aimPitch < 0) c.aimPitch = 0.25; if (v.pos.y < 20) c.aimPitch = 0.4;
+      // terrain/obstacle lookahead + safe minimum altitude
+      const fwd3 = new THREE.Vector3(0, 0, -1).applyEuler(new THREE.Euler(v.pitch, v.yaw, 0, 'YXZ'));
+      for (const tt of [0.5, 1, 1.5, 2.5]) { const q = v.pos.clone().addScaledVector(fwd3, Math.max(Math.hypot(v.vx || 0, v.vy || 0, v.vz || 0), 20) * tt); if (q.y < 22 || this.airHit(v, q)) { c.aimPitch = 0.6; break; } }
+      const edge = this.map.size / 2 - 30; if (Math.abs(v.pos.x) > edge || Math.abs(v.pos.z) > edge) c.aimYaw = Math.atan2(v.pos.x, v.pos.z); }
     if (aimDir) { const fwd = new THREE.Vector3(-Math.sin(v.yaw), 0, -Math.cos(v.yaw)); const facing = mode === 'tracked' || mode === 'walker' || mode === 'heli' ? true : fwd.dot(new THREE.Vector3(aimDir.x, 0, aimDir.z).normalize()) > 0.93;
       if (facing && mode !== 'car') { u.vcd = (u.vcd || 0) - dt; if (u.vcd <= 0) { u.vcd = 0.12; c.fire = Math.random() < 0.6; c.alt = Math.random() < 0.08; } } }
     if (mode === 'car' && v.seats[1].unit) this.botGunner(v, v.seats[1], dt);
