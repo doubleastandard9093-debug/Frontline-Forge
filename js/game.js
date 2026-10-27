@@ -5,7 +5,7 @@ import { mat, makeRenderer, isPhone } from './gfx.js';
 import { KINDS, createVehicle, syncSolid } from './vehicles.js';
 import { input, pollKeys, consume, endFrame } from './input.js';
 
-const TICK = 1 / 60, EYE = 1.6, RAD = 0.4, GRAV = 22;
+const TICK = 1 / 60, EYE = 1.6, RAD = 0.4, GRAV = 15; // lower gravity, floaty high jumps
 const BOT_NAMES = ['Viper','Rook','Hatch','Nomad','Quill','Saber','Ghostline','Tank','Moth','Flint','Ruckus','Jinx','Bolt','Cinder','Drift','Echo','Grim','Halo','Ion','Kestrel','Lynx','Mako','Onyx','Pike'];
 
 export class Game {
@@ -135,7 +135,7 @@ export class Game {
     }
     const lim = this.map.size / 2 - RAD; p.x = THREE.MathUtils.clamp(p.x, -lim, lim); p.z = THREE.MathUtils.clamp(p.z, -lim, lim);
     const gh = this.groundAt(p);
-    if (jump && u.onGround) { u.vy = 8; u.onGround = false; }
+    if (jump && u.onGround) { u.vy = 9.2; u.onGround = false; }
     u.vy -= GRAV * dt; p.y += u.vy * dt;
     // ceiling
     if (u.vy > 0) for (const s of this.solids) if (p.x > s.min.x && p.x < s.max.x && p.z > s.min.z && p.z < s.max.z && s.min.y > p.y + 1 && s.min.y < p.y + 1.85) { u.vy = 0; break; }
