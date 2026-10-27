@@ -149,7 +149,7 @@ export function building(x, z, w, d, h, color, kind) {
   signM = signM || new THREE.MeshStandardMaterial({ map: sign(), roughness: 0.6, polygonOffset: true, polygonOffsetFactor: -2 });
   const extras = [];
   if (h > 1.2 && kind !== 'wood') { // roof coping + base plinth
-    const cap = new THREE.Mesh(new THREE.BoxGeometry(w + 0.16, 0.14, d + 0.16), trimM); cap.position.set(x, h + 0.07, z); extras.push(cap);
+    const cap = new THREE.Mesh(worldUV(new THREE.BoxGeometry(w + 0.16, 0.14, d + 0.16), w + 0.16, 0.14, d + 0.16), bmat('concrete', 0x6f6c66)); cap.position.set(x, h + 0.07, z); extras.push(cap);
     const base = new THREE.Mesh(worldUV(new THREE.BoxGeometry(w + 0.08, 0.3, d + 0.08), w + 0.08, 0.3, d + 0.08), bmat('concrete', 0x77736b)); base.position.set(x, 0.15, z); extras.push(base); }
   if (kind === 'wood' && h > 1) for (const sx of [-1, 1]) for (const sz of [-1, 1]) { const post = new THREE.Mesh(new THREE.BoxGeometry(0.12, h, 0.12), trimM); post.position.set(x + sx * (w / 2 - 0.02), h / 2, z + sz * (d / 2 - 0.02)); extras.push(post); }
   if (h > 1.5 && !isPhone) for (const [nx, nz, len] of [[0, 1, w], [0, -1, w], [1, 0, d], [-1, 0, d]]) { // grime/streak decals on each face
@@ -212,4 +212,62 @@ export function vehicleFx(game, dt) {
     const top = v.pos.clone(); top.y += v.K.h * 0.9; puff(game.scene, top, false); if (st === 2) puff(game.scene, top, true); }
   for (const p of puffs) { if (p.life <= 0) continue; p.life -= dt; const t = 1 - p.life / p.max; p.s.position.y += dt * (p.fire ? 2.5 : 1.6); p.s.scale.setScalar((p.fire ? 0.8 : 1.2) + t * (p.fire ? 0.6 : 3));
     p.s.material.opacity = (p.fire ? 0.9 : 0.55) * (1 - t); if (p.life <= 0) p.s.visible = false; }
+}
+
+// ---------- environment: blended terrain, wind grass, layered foliage, sky, fog, water, sun-following shadows ----------
+SETS.ground = () => makeSet('ground', (x, y, n, h) => { const blade = Math.sin(x * 1.7 + h * 9) * Math.cos(y * 1.3) * 0.5 + 0.5, v = 0.75 + blade * 0.25;
+  return { c: [180 * v, 180 * v, 180 * v], h: blade * 0.4 + h * 0.3, r: 0.95 }; }, 71, 2);
+SETS.water = () => makeSet('water', (x, y, n, h) => ({ c: [255, 255, 255], h: h, r: 0.05 }), 83, 1.2);
+SETS.leaf = () => makeSet('leaf', (x, y, n, h) => { const v = 0.7 + h * 0.4; return { c: [200 * v, 220 * v, 190 * v], h: (h > 0.5 ? 1 : 0) * 0.5 + h * 0.3, r: 0.8 }; }, 97, 3);
+function splat(size, seed) { // terrain albedo: grass / dry grass / dirt / gravel blended by noise
+  const n = isPhone ? 512 : 1024, a = noiseField(n, seed, 6), b = noiseField(n, seed + 5, 4), px = new Uint8ClampedArray(n * n * 4);
+  const grass = [88, 112, 58], dry = [128, 124, 72], dirt = [112, 92, 66], grav = [130, 126, 118];
+  for (let i = 0; i < n * n; i++) { const t1 = clamp((a[i] - 0.55) * 4), t2 = clamp((b[i] - 0.62) * 5), t3 = clamp((a[i] * b[i] - 0.42) * 6), j = (Math.random() - 0.5) * 10;
+    for (let k = 0; k < 3; k++) { let c = mix(grass[k], dry[k], t1); c = mix(c, dirt[k], t2); c = mix(c, grav[k], t3 * 0.7); px[i * 4 + k] = c + j; } px[i * 4 + 3] = 255; }
+  const t = toTex(px, n, true); t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping; return t; }
+let waterMats = [], skyDome = null;
+export function environment(game) {
+  const s = game.scene, M = game.map, L = game.layout, size = M.size;
+  // terrain
+  const ground = s.children.find(o => o.userData.kind === 'ground' && o.geometry.type === 'PlaneGeometry' && o.geometry.parameters.width >= size * 2);
+  if (ground) { const det = SETS.ground(), nm = det.normalMap.clone(), rm = det.roughnessMap.clone(); nm.repeat.set(size / 2, size / 2); rm.repeat.copy(nm.repeat); nm.needsUpdate = rm.needsUpdate = true;
+    ground.material = new THREE.MeshStandardMaterial({ map: splat(size, 5), normalMap: nm, roughnessMap: rm, roughness: 1, color: new THREE.Color(M.ground).lerp(new THREE.Color(0xffffff), 0.55) }); }
+  // sky dome + exponential fog matched to the horizon
+  const hor = new THREE.Color(M.sky).lerp(new THREE.Color(0xe8eef2), 0.4);
+  skyDome = new THREE.Mesh(new THREE.SphereGeometry(500, 32, 16), new THREE.ShaderMaterial({ side: THREE.BackSide, depthWrite: false, fog: false, uniforms: { top: { value: new THREE.Color(0x3d6fb8) }, hor: { value: hor } },
+    vertexShader: 'varying vec3 vP; void main(){ vP = normalize(position); vec4 p = projectionMatrix * modelViewMatrix * vec4(position,1.); gl_Position = p.xyww; }',
+    fragmentShader: 'uniform vec3 top; uniform vec3 hor; varying vec3 vP; void main(){ float h = max(vP.y, 0.); vec3 c = mix(hor, top, pow(h, .55)); vec3 sd = normalize(vec3(.45,.8,.35)); float d = max(dot(vP, sd), 0.); c += vec3(1.,.9,.7) * (pow(d, 900.) * 6. + pow(d, 12.) * .25); gl_FragColor = vec4(c, 1.); }' }));
+  skyDome.renderOrder = -1; skyDome.frustumCulled = false; s.add(skyDome); s.background = hor; s.fog = new THREE.FogExp2(hor, 1.1 / size);
+  // layered conifers + PBR bark + rock material
+  const tiers = []; for (let i = 0; i <= 4; i++) { const y = i / 4; tiers.push(new THREE.Vector2(0.01, -2 + y * 4)); }
+  const prof = [[0, -2.1], [1.75, -1.9], [0.9, -1.0], [1.4, -0.9], [0.6, 0.1], [1.05, 0.2], [0.35, 1.1], [0.6, 1.2], [0.01, 2.2]].map(([r, y]) => new THREE.Vector2(r, y));
+  const leafG = new THREE.LatheGeometry(prof, isPhone ? 7 : 11), leafM = pbr('leaf', 0x3d6a32, { roughness: 1 }), barkM = pbr('wood', 0x7a5a3c, { normalScale: 2 }), rockM = pbr('concrete', 0x8c8a84, { normalScale: 1.6 });
+  for (const o of s.children) { if (o.userData.hp === 120 && o.children.length === 2) { const [tr, lf] = o.children; tr.material = barkM; lf.geometry = leafG; lf.material = leafM; lf.rotation.y = Math.random() * 6; lf.scale.setScalar(0.9 + Math.random() * 0.3); }
+    else if (o.userData.res === 'stone') { o.material = rockM; o.receiveShadow = true; } }
+  // wind-animated grass blades (instanced, tapered, color-varied)
+  const bg = new THREE.PlaneGeometry(0.09, 0.6, 1, 3); bg.translate(0, 0.3, 0); const p = bg.attributes.position; for (let i = 0; i < p.count; i++) { const y = p.getY(i) / 0.6; p.setX(i, p.getX(i) * (1 - y * 0.9)); }
+  const gm = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.9, side: THREE.DoubleSide });
+  gm.onBeforeCompile = sh => { sh.uniforms.uTime = game.grassTime = { value: 0 }; sh.vertexShader = 'uniform float uTime;\n' + sh.vertexShader.replace('#include <begin_vertex>',
+    '#include <begin_vertex>\n vec4 wp = instanceMatrix * vec4(0.,0.,0.,1.); float sway = sin(uTime*1.8 + wp.x*.35 + wp.z*.27) * .18 + sin(uTime*3.1 + wp.x) * .05; transformed.x += sway * position.y * position.y; transformed.z += sway * .5 * position.y * position.y;'); };
+  const n = isPhone ? 3000 : 14000, im = new THREE.InstancedMesh(bg, gm, n), d = new THREE.Object3D(), col = new THREE.Color();
+  const block = (x, z) => L.boxes.some(b => Math.abs(x - b[0]) < b[2] / 2 + 0.3 && Math.abs(z - b[1]) < b[3] / 2 + 0.3) || (L.water || []).some(w => x > w[0] && x < w[1] && z > w[2] && z < w[3]);
+  let k = 0; for (let tries = 0; k < n && tries < n * 3; tries++) { const x = (Math.random() - 0.5) * size, z = (Math.random() - 0.5) * size; if (block(x, z)) continue;
+    d.position.set(x, 0, z); d.rotation.set((Math.random() - 0.5) * 0.3, Math.random() * 6.3, 0); d.scale.set(1, 0.6 + Math.random() * 0.9, 1); d.updateMatrix(); im.setMatrixAt(k, d.matrix);
+    im.setColorAt(k++, col.setHSL(0.24 + Math.random() * 0.06, 0.5 + Math.random() * 0.2, 0.1 + Math.random() * 0.08)); }
+  im.count = k; im.receiveShadow = true; s.add(im);
+  // bushes
+  const bushG = new THREE.IcosahedronGeometry(0.7, 1), bushes = new THREE.InstancedMesh(bushG, leafM, isPhone ? 40 : 160); let bk = 0;
+  for (const [x, z] of L.trees) for (let j = 0; j < 2 && bk < bushes.count; j++) { d.position.set(x + (Math.random() - 0.5) * 4, 0.3, z + (Math.random() - 0.5) * 4); if (block(d.position.x, d.position.z)) continue; d.rotation.set(0, Math.random() * 6, 0); d.scale.set(1 + Math.random(), 0.6 + Math.random() * 0.5, 1 + Math.random()); d.updateMatrix(); bushes.setMatrixAt(bk++, d.matrix); }
+  bushes.count = bk; bushes.castShadow = bushes.receiveShadow = true; s.add(bushes);
+  // water: reflective, scrolling double normal maps
+  waterMats = []; for (const o of s.children) if (o.userData.kind === 'ground' && o !== ground && o.geometry.type === 'PlaneGeometry') { const w = SETS.water(), a = w.normalMap.clone(), pw = o.geometry.parameters;
+    a.repeat.set(pw.width / 6, pw.height / 6); a.needsUpdate = true; o.material = new THREE.MeshPhysicalMaterial({ color: 0x1f5a70, roughness: 0.06, metalness: 0.0, normalMap: a, normalScale: new THREE.Vector2(0.5, 0.5), transparent: true, opacity: 0.86, clearcoat: 1, envMapIntensity: 1.4 }); waterMats.push(o.material); }
+  // shadows: tight frustum that follows the player = crisp shadows without a giant map
+  game.sunLight = s.children.find(o => o.isDirectionalLight); if (game.sunLight) { const c = game.sunLight.shadow.camera; Object.assign(c, { left: -45, right: 45, top: 45, bottom: -45, near: 1, far: 260 }); c.updateProjectionMatrix(); game.sunLight.shadow.normalBias = 0.03; }
+  game.renderer.toneMappingExposure = 1.0;
+}
+export function tick(game, dt) {
+  if (game.grassTime) game.grassTime.value += dt; for (const m of waterMats) { m.normalMap.offset.x += dt * 0.02; m.normalMap.offset.y += dt * 0.013; }
+  const P = game.player, L = game.sunLight; if (P && L) { L.target.position.set(P.pos.x, 0, P.pos.z); L.position.set(P.pos.x + 40, 80, P.pos.z + 30); L.target.updateMatrixWorld(); }
+  if (skyDome) skyDome.position.copy(game.camera.position);
 }

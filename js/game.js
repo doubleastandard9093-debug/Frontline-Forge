@@ -62,7 +62,8 @@ export class Game {
     for (const [x, z] of L.rocks) { const r = new THREE.Mesh(rockG, this.m(0x7d7d78, 'concrete')); r.position.set(x, 0.6, z); r.castShadow = true; s.add(r);
       r.userData = { kind: 'harvest', res: 'stone', obj: r, hp: 180 }; r.userData.obj = r; this.hitMeshes.push(r);
       this.solids.push({ min: new THREE.Vector3(x - 1, 0, z - 1), max: new THREE.Vector3(x + 1, 1.6, z + 1), obj: r }); }
-    if (this.tier === 'high') { // High-only decoration
+    if (this.hf) this.hf.environment(this);
+    else if (this.tier === 'high') { // High-only decoration (fallback if the realism pack failed to load)
       const grassG = new THREE.ConeGeometry(0.08, 0.5, 3), grassM = new THREE.MeshStandardMaterial({ color: 0x4f7a35, roughness: 1 });
       const n = isPhone ? 1500 : 5000, im = new THREE.InstancedMesh(grassG, grassM, n), d = new THREE.Object3D();
       for (let i = 0; i < n; i++) { d.position.set((Math.random() - 0.5) * M.size, 0.25, (Math.random() - 0.5) * M.size); d.rotation.set(0, Math.random() * 6, (Math.random() - 0.5) * 0.4); d.updateMatrix(); im.setMatrixAt(i, d.matrix); }
@@ -508,7 +509,7 @@ export class Game {
     this.near = null; this.hijack = null; if (!P.vehicle && P.alive) for (const v of this.vehicles) { if (!v.alive) continue; const d = v.pos.distanceTo(P.pos);
       if (v.team === P.team && d < 5 && v.seats.some(s => !s.unit)) { this.near = v; break; }
       if (v.team !== P.team && (v.K.mode === 'car' || v.K.mode === 'tracked' || v.K.mode === 'walker' || v.K.mode === 'boat') && d < v.K.r + 2.2 && Math.abs(v.pos.y - P.pos.y) < 4) this.hijack = v; }
-    if (this.hf) this.hf.vehicleFx(this, dt);
+    if (this.hf) { this.hf.vehicleFx(this, dt); this.hf.tick(this, dt); }
     for (const v of this.vehicles) if (v.alive) v.empT = Math.max(0, (v.empT || 0) - dt); else { v.respawn -= dt; if (v.respawn <= 0) this.respawnVehicle(v); }
     // view-distance LOD: skip drawing far bots
     const lod = this.tier === 'low' ? 85 : 160; for (const u of this.units) if (u.mesh && u.alive) u.mesh.visible = !u.vehicle && u.pos.distanceTo(P.pos) < lod;
