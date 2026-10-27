@@ -99,6 +99,12 @@ export class Game {
     this.solids.push({ min: new THREE.Vector3(x - w / 2, 0, z - d / 2), max: new THREE.Vector3(x + w / 2, h, z + d / 2) });
   }
   gunDef(id) { if (typeof id === 'string' && id[0] === 'L') return this.save.inv.find(x => 'L' + x.uid === id) || GUNS.kr4; return GUNS[id] || GUNS.kr4; }
+  // Learnable recoil: a fixed pattern per gun type; loot guns get a seeded per-maker variant. Grips scale it via w.recoil.
+  static recoilKick(w, n) {
+    const P = { rifle: [0.35, 0.5, 0.3], smg: [0.6, 0.9, 1], lmg: [0.25, 0.35, 2], pistol: [0.2, 1.3, 0], shotgun: [0.1, 0.5, 0], sniper: [0.15, 0.5, 0] }[w.type] || [0.3, 0.6, 0];
+    let amp = P[0], ph = P[2]; if (w.maker || String(w.id).startsWith('L')) { let h = 0; for (const c of String(w.maker || '') + w.type) h = (h * 31 + c.charCodeAt(0)) >>> 0; ph += h % 7; amp *= 0.8 + (h % 5) * 0.1; }
+    return [w.recoil * amp * Math.sin(n * P[1] + ph), w.recoil * (1 + Math.min(n, 8) * 0.06)];
+  }
   makeWeapon(id) {
     const base = this.gunDef(id), att = base.loot ? {} : this.save.attach[id] || {}; const w = Object.assign({ id }, base); w.adsZoom = base.zoom || 1.15;
     for (const a of Object.values(att)) { const mod = ATTACH[a]?.mod || {}; for (const k in mod) w[k] = k === 'adsZoom' ? Math.max(w[k], mod[k]) : w[k] * mod[k]; }
@@ -193,18 +199,20 @@ export class Game {
         const h = this.firstHit(this.player); if (h) this.damageAt(h, 30, this.player, false, true); } return; }
     if (w.reloading > 0) { w.reloading -= dt; if (w.reloading <= 0) { if (w.reserve !== undefined) { const t = Math.min(w.mag - w.ammo, w.reserve); w.ammo += t; w.reserve -= t; } else w.ammo = w.mag; this.hooks.hud(this); } return; }
     if ((consume('KeyR', 'btn_reload') || w.ammo <= 0) && w.ammo < w.mag && !(w.reserve <= 0)) { w.reloading = w.reload; this.sfx('reload'); this.hooks.toast('Reloading'); return; }
+    w.bloom = Math.max(0, (w.bloom || 0) - dt * w.spread * (w.sinceShot > 0.25 ? 4 : 0.8)); w.sinceShot = (w.sinceShot || 0) + dt; if (w.sinceShot > 0.35) w.shotN = 0;
     if (!input.fire || this.fireT > 0) return;
     if (!w.auto) { if (this.semiHeld) return; this.semiHeld = true; }
     this.fireT = 60 / w.rpm; w.ammo--; this.player.firedT = 1.5; this.sfx(Game.gunSound(w));
     const moving = Math.hypot(input.move.x, input.move.y) > 0.1, ads = this.adsT > 0.5;
-    const spread = w.spread * (ads ? 0.3 : 1) * (moving ? 1.6 : 1) * (this.player.onGround ? 1 : 2);
+    const spread = (w.spread + (w.bloom || 0)) * (ads ? 0.3 : 1) * (moving ? (ads ? 1.15 : 1.8) : 1) * (this.player.onGround ? 1 : 2);
+    w.bloom = Math.min(w.spread * 1.5, (w.bloom || 0) + w.spread * 0.15); w.sinceShot = 0;
     for (let i = 0; i < (w.pellets || 1); i++) {
       const d = this.aimRay(w.pellets ? w.spread : spread); const h = this.firstHit(this.player);
       const end = h ? h.point : this.camera.position.clone().addScaledVector(d, 120);
       if (h && h.distance <= w.range * 1.5) this.damageAt(h, w.dmg * (h.distance > w.range ? 0.6 : 1), this.player, h.object.userData.head);
       this.tracer(this.view.localToWorld(new THREE.Vector3(0, 0, -0.6)), end);
     }
-    this.recoilP += w.recoil * (ads ? 0.6 : 1); this.player.yaw += (Math.random() - 0.5) * w.recoil * 0.4; this.kick = 1;
+    { const k = Game.recoilKick(w, w.shotN || 0), m = ads ? 0.6 : 1; w.shotN = (w.shotN || 0) + 1; this.recoilP += k[1] * m; this.player.yaw += k[0] * m + (Math.random() - 0.5) * w.recoil * 0.08; } this.kick = 1;
     if (this.flash) { this.flash.visible = true; setTimeout(() => this.flash && (this.flash.visible = false), 40); }
     this.hooks.hud(this);
   }
