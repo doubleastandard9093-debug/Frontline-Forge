@@ -73,3 +73,5 @@ body.cloaked #visor{background:radial-gradient(ellipse 120% 100% at 50% 50%,tran
 #cross[data-ret=chevron] i:nth-child(1),#cross[data-ret=chevron] i:nth-child(3),#cross[data-ret=chevron] i:nth-child(4){display:none}#cross[data-ret=chevron] i:nth-child(2){left:-1px;top:2px;height:10px}#cross[data-ret=chevron]::after{content:'';position:absolute;left:-7px;top:-2px;width:10px;height:10px;border-left:2px solid #fff;border-top:2px solid #fff;transform:rotate(45deg)}
 #cross[data-ret=tight] i:nth-child(1){top:-9px;height:5px}#cross[data-ret=tight] i:nth-child(2){top:4px;height:5px}#cross[data-ret=tight] i:nth-child(3){left:-9px;width:5px}#cross[data-ret=tight] i:nth-child(4){left:4px;width:5px}
 .badge{color:#ffd84a;font-weight:700}
+.tree{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:6px}.branch h4{margin:2px 0}.tree .row{display:flex;justify-content:space-between;gap:4px;align-items:center;font-size:12px}.tree .row.locked{opacity:.45}.tree .row.cap span{color:#ffd84a}
+@media (max-width:700px){.tree{grid-template-columns:1fr}}

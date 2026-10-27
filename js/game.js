@@ -109,7 +109,7 @@ export class Game {
   makeWeapon(id) {
     const base = this.gunDef(id), att = base.loot ? {} : this.save.attach[id] || {}; const w = Object.assign({ id }, base); w.adsZoom = base.zoom || 1.15;
     for (const a of Object.values(att)) { const mod = ATTACH[a]?.mod || {}; for (const k in mod) w[k] = k === 'adsZoom' ? Math.max(w[k], mod[k]) : w[k] * mod[k]; }
-    w.dmg *= durMult(this.save, id); w.mag = Math.round(w.mag); w.reload *= 1 - this.save.stats.reload * 0.04; w.ammo = w.mag; w.reloading = 0; return w;
+    w.dmg *= durMult(this.save, id); if (this.sk) w.reload *= 1 - 0.08 * this.sk('nimble'); w.mag = Math.round(w.mag); w.reload *= 1 - this.save.stats.reload * 0.04; w.ammo = w.mag; w.reloading = 0; return w;
   }
   makeUnit(team, isPlayer, name) {
     const u = { id: ++this.nextId, team, isPlayer, name, pos: new THREE.Vector3(), vy: 0, yaw: 0, pitch: 0, hp: 100, maxHp: 100, sh: 100, maxSh: 100, shT: 9, alive: true, onGround: false, kills: 0, deaths: 0, respawn: 0 };
@@ -137,7 +137,7 @@ export class Game {
       u.pos.set(THREE.MathUtils.clamp(sp[0] + (Math.random() - 0.5) * spread, -h, h), 0, THREE.MathUtils.clamp(sp[1] + (Math.random() - 0.5) * (isBase ? 8 : 10), -h, h));
       if (!this.blocked(u.pos)) break;
     }
-    u.vehicle = null; u.goVeh = null; u.hp = u.maxHp; u.nades = { frag: 2, plasma: 2 }; u.sh = u.maxSh; u.shT = 9; u.alive = true; u.vy = 0; u.yaw = u.team === 0 ? 0 : Math.PI; u.pitch = 0; u.spawnProt = 2;
+    u.vehicle = null; u.goVeh = null; u.hp = u.maxHp; u.nades = { frag: 2 + (u.isPlayer ? this.fragBonus || 0 : 0), plasma: 2 }; u.sh = u.maxSh; u.shT = 9; u.alive = true; u.vy = 0; u.yaw = u.team === 0 ? 0 : Math.PI; u.pitch = 0; u.spawnProt = 2;
     if (u.mesh) u.mesh.visible = true;
   }
   blocked(p) { for (const s of this.solids) if (p.x > s.min.x - RAD && p.x < s.max.x + RAD && p.z > s.min.z - RAD && p.z < s.max.z + RAD && s.max.y > p.y + 0.5 && s.min.y < p.y + 1.7) return true; return false; }
@@ -213,7 +213,7 @@ export class Game {
       if (h && h.distance <= w.range * 1.5) this.damageAt(h, w.dmg * (h.distance > w.range ? 0.6 : 1), this.player, h.object.userData.head);
       this.tracer(this.view.localToWorld(new THREE.Vector3(0, 0, -0.6)), end);
     }
-    { const k = Game.recoilKick(w, w.shotN || 0), m = ads ? 0.6 : 1; w.shotN = (w.shotN || 0) + 1; this.recoilP += k[1] * m; this.player.yaw += k[0] * m + (Math.random() - 0.5) * w.recoil * 0.08; } this.kick = 1;
+    { const k = Game.recoilKick(w, w.shotN || 0), m = (ads ? 0.6 : 1) * (1 - 0.15 * this.sk('steady')); w.shotN = (w.shotN || 0) + 1; this.recoilP += k[1] * m; this.player.yaw += k[0] * m + (Math.random() - 0.5) * w.recoil * 0.08; } this.kick = 1;
     if (this.flash) { this.flash.visible = true; setTimeout(() => this.flash && (this.flash.visible = false), 40); }
     this.hooks.hud(this);
   }
@@ -221,12 +221,12 @@ export class Game {
     const ud = h.object.userData;
     const w = src?.isPlayer ? this.slots[this.slot] : null;
     if (ud.kind === 'unit') { const ch = this.cls === 'sparkwright' ? 0.06 * lv(this.save, 'charged') : 0, el = w?.elem || (ch && !w?.pick ? 'shock' : null);
-    if (w && el && ud.unit.team !== src.team && Math.random() < (w.elem ? w.elemChance : 0) + ch) { ud.unit.dot = { elem: el, dps: w.elemDps || Math.round(w.dmg * 0.5), t: 4, acc: 0, src }; } const P = this.player, bonus = src === P ? (head ? 1 + 0.12 * lv(this.save, 'deadeye') * (this.cls === 'ghostwire') : 1) * (P.cloakShot ? 3 : 1) : 1; if (src === P) P.cloakShot = false; this.hurt(ud.unit, dmg * (head ? 2 : 1) * bonus, src, head); }
+    if (w && el && ud.unit.team !== src.team && Math.random() < (w.elem ? w.elemChance : 0) + ch) { ud.unit.dot = { elem: el, dps: (w.elemDps || Math.round(w.dmg * 0.5)) * (1 + 0.2 * this.sk('conductor')), t: 4 + this.sk('catalyst'), acc: 0, src }; } const P = this.player, bonus = src === P ? (head ? 1 + 0.12 * lv(this.save, 'deadeye') * (this.cls === 'ghostwire') : 1) * (P.cloakShot ? 3 + 0.5 * this.sk('ambush') : 1) * (1 + 0.04 * this.sk('stopping')) * (w && (w.type === 'rifle' || w.type === 'sniper') ? 1 + 0.05 * this.sk('longshot') : 1) * (head && ud.unit.sh <= 0 && this.sk('execution') ? 1.5 : 1) * (ud.unit.dot ? 1 + 0.05 * this.sk('amp') : 1) : 1; if (src === P) P.cloakShot = false; this.hurt(ud.unit, dmg * (head ? 2 : 1) * bonus, src, head); }
     else if (ud.kind === 'rune') { if (src?.isPlayer && this.zRune) this.zRune(h.object); }
     else if (ud.kind === 'vehicle') this.hurtVehicle(ud.vehicle, dmg * (w?.elem === 'corrosive' ? 1.5 : 1), src);
     else if (ud.kind === 'build') { const b = ud.build; b.hp -= dmg * (pick ? 2 : 1); b.mesh.material.opacity = 1; if (b.hp <= 0) this.removeBuild(b); }
     else if (ud.kind === 'harvest' && src.isPlayer && pick) {
-      const o = ud.obj; o.userData.hp = (o.userData.hp || 120) - 30; const amt = 6 + this.save.stats.build; this.mats[ud.res] += amt;
+      const o = ud.obj; o.userData.hp = (o.userData.hp || 120) - 30; const amt = 6 + this.save.stats.build + this.sk('tinker'); this.mats[ud.res] += amt;
       this.hooks.toast(`+${amt} ${ud.res}`); o.scale.multiplyScalar(0.96);
       if (o.userData.hp <= 0) { this.scene.remove(o); this.hitMeshes = this.hitMeshes.filter(m => m.userData.obj !== o); this.solids = this.solids.filter(s => s.obj !== o); this.nav.dirty = true; }
       this.hooks.hud(this);
@@ -238,6 +238,7 @@ export class Game {
     if (u.downed) return; if (u.zombie) { dmg *= this.zDmgMul(u, src, head); if (this.z?.insta > 0 && u.ztype !== 'boss') dmg = 1e6; this.zHit(u, src); }
     if (elem === 'shock' && u.sh > 0) dmg *= 2; else if (elem === 'fire' && u.sh <= 0) dmg *= 1.5;
     if (u.dmgTaken) dmg *= u.dmgTaken();
+    if (this.dome && !u.isPlayer && u.team === this.dome.team && u.pos.distanceTo(this.dome.pos) < 5) dmg *= 0.4;
     if (src?.isPlayer && u !== src) this.hooks.dmgNum(u.pos, dmg * (head && u.sh <= 0 ? 2 : 1), elem, head);
     // Recharging energy shield over health: absorbs damage first (no headshot bonus on shields), pops when depleted.
     // Halo-style: the shield soaks everything; the headshot bonus only applies once the shield is already down.
@@ -251,6 +252,9 @@ export class Game {
       if (!u.isPlayer) { if (u.team !== this.player.team && Math.random() < (this.mode === 'zombies' ? 0.04 : 0.3)) this.dropLoot(genGun(this.save.rank + 1), u.pos); else if (this.mode !== 'zombies') this.dropWeapon(u.gun.id || 'kr4', u.pos, 0.6); }
       u.alive = false; u.deaths++; u.respawn = 3; src.kills++; this.score[src.team]++;
       if (u.mesh) u.mesh.visible = false; if (u.zombie) this.zKill(u, src, head);
+      if (src.isPlayer && this.sk) { const P = this.player, sk = this.sk, w = this.slots[this.slot];
+        if (sk('siphon')) P.sh = Math.min(P.maxSh, P.sh + 40); if (sk('juggernaut')) this.skill.cdT = Math.max(0, this.skill.cdT - 5); if (sk('phantom') && P.cloakT > 0) this.skill.cdT = 0;
+        if (sk('scavenger') && w && !w.pick) w.ammo = Math.min(w.mag, w.ammo + Math.ceil(w.mag * 0.1 * sk('scavenger'))); if (sk('nova') && u.dot) this.explode(u.pos.clone().setY(1), 40, 3, P); }
       if (src.isPlayer && u.zombie) { this.stats.kills++; if (head) this.stats.head++; }
       else if (src.isPlayer) { this.stats.kills++; if (head) this.stats.head++; this.hooks.toast(head ? 'HEADSHOT +150 XP' : 'Eliminated +100 XP'); }
       if (u.isPlayer) { this.stats.deaths++; this.hooks.toast(`Eliminated by ${src.name}`); }
@@ -300,7 +304,7 @@ export class Game {
     this.mats.wood -= BUILD[g.type].cost; this.stats.builds++;
     const [w, h, d] = this.pieceGeo(g.type, g.dir), mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), this.m(0xa77b4a, 'wood'));
     mesh.position.copy(this.ghost.position); mesh.quaternion.copy(this.ghost.quaternion); mesh.castShadow = mesh.receiveShadow = true; this.scene.add(mesh);
-    const b = { id: ++this.nextId, key: this.key(g), g, mesh, hp: BUILD[g.type].hp * (1 + this.save.stats.build * 0.1) };
+    const b = { id: ++this.nextId, key: this.key(g), g, mesh, hp: BUILD[g.type].hp * (1 + this.save.stats.build * 0.1 + 0.15 * this.sk('fortify')) };
     mesh.userData = { kind: 'build', build: b }; this.hitMeshes.push(mesh);
     if (g.type === 'ramp') { b.ramp = { cx: g.x, cz: g.z, y0: g.y, dir: g.dir }; this.ramps.push(b.ramp); }
     else { b.solid = { min: new THREE.Vector3(g.x - w / 2, g.type === 'floor' ? g.y : g.y, g.z - d / 2), max: new THREE.Vector3(g.x + w / 2, g.y + h + (g.type === 'floor' ? 0 : 0), g.z + d / 2) }; this.solids.push(b.solid); }
@@ -439,7 +443,8 @@ export class Game {
     if (P.alive && P.vehicle) { this.buildMode = null; this.pilot(P.vehicle, dt); }
     else if (P.alive) {
       P.spawnProt = Math.max(0, (P.spawnProt || 0) - dt);
-      const sp = 5.5 * (P.speedMul || 1) * (P.zSpeed || 1) * (P.downed ? 0.25 : 1) * (1 + this.save.stats.speed * 0.03) * (input.sprint && input.move.y > 0 && !input.ads ? 1.45 : 1) * (input.ads ? 0.6 : 1);
+      P.moving = Math.hypot(input.move.x, input.move.y) > 0.1;
+    const sp = 5.5 * (P.speedMul || 1) * (P.cloakT > 0 && this.sk ? 1 + 0.1 * this.sk('ghostrun') : 1) * (P.zSpeed || 1) * (P.downed ? 0.25 : 1) * (1 + this.save.stats.speed * 0.03) * (input.sprint && input.move.y > 0 && !input.ads ? 1.45 : 1) * (input.ads ? 0.6 : 1);
       const fx = -Math.sin(P.yaw), fz = -Math.cos(P.yaw), rx = Math.cos(P.yaw), rz = -Math.sin(P.yaw);
       let mx = fx * input.move.y + rx * input.move.x, mz = fz * input.move.y + rz * input.move.x; const l = Math.hypot(mx, mz); if (l > 1) { mx /= l; mz /= l; }
       this.moveUnit(P, mx * sp * dt, mz * sp * dt, dt, input.jump);
@@ -474,7 +479,7 @@ export class Game {
       if (!u.alive) { if (u.zombie || (this.mode === 'zombies' && u.team === 0)) continue; u.respawn -= dt; if (u.respawn <= 0 && !this.over) {
         if (u.isPlayer && this.capPoints.length) { if (!this.choosing) { this.choosing = true; document.exitPointerLock?.(); this.hooks.spawnSelect(this.spawnOptions(u.team)); } else this.hooks.spawnRefresh?.(this.spawnOptions(u.team)); }
         else this.spawn(u); } continue; }
-      if (!u.isPlayer) { u.spawnProt = Math.max(0, u.spawnProt - dt); if (u.zombie) this.zombieThink(u, dt); else if (!u.downed) this.botThink(u, dt); }
+      if (!u.isPlayer) { u.spawnProt = Math.max(0, u.spawnProt - dt); if (u.zombie) this.zombieThink(u, dt); else if (!u.downed && !u.decoy) this.botThink(u, dt); }
     }
     for (const tr of this.tracers) { tr.t -= dt; if (tr.t <= 0) { this.scene.remove(tr.l); tr.l.geometry.dispose(); } } this.tracers = this.tracers.filter(t => t.t > 0);
     this.hudT = (this.hudT || 0) - dt; if (this.hudT <= 0) { this.hudT = 0.2; this.hooks.hud(this); }
@@ -542,7 +547,7 @@ export class Game {
     if (u.isPlayer) { this.swing = 0.25; this.kick = 2; }
     if (!best) return; const tf = new THREE.Vector3(-Math.sin(best.yaw), 0, -Math.cos(best.yaw)); const behind = tf.dot(f) > 0.5;
     if (u.isPlayer && bd > 1.2) { const d = best.pos.clone().sub(u.pos).setY(0).normalize(); this.moveUnit(u, d.x * (bd - 1), d.z * (bd - 1), 0, false); }
-    this.hurt(best, behind ? 300 : 70, u, false); if (u.isPlayer) this.hooks.toast(behind ? 'ASSASSINATION' : 'Melee');
+    this.hurt(best, behind ? 300 : 70 * (u.isPlayer && this.sk ? 1 + 0.25 * this.sk('brawler') : 1), u, false); if (u.isPlayer) this.hooks.toast(behind ? 'ASSASSINATION' : 'Melee');
   }
   // ---------- vehicles (shared by player and bots) ----------
   seatOf(u) { return u.vehicle ? u.vehicle.seats.find(s => s.unit === u) : null; }
@@ -698,7 +703,7 @@ export class Game {
   }
   updateDots(dt) { for (const u of this.units) { const d = u.dot; if (!d) continue; if (!u.alive) { u.dot = null; continue; }
       d.t -= dt; d.acc += dt; if (d.acc >= 0.5) { d.acc -= 0.5; this.hurt(u, d.dps * 0.5, d.src, false, d.elem); } if (d.t <= 0) u.dot = null; } }
-  regenShields(dt) { for (const u of this.units) if (u.alive) { u.shT += dt; if (u.shT > (u.shDelay || 3) && u.sh < u.maxSh) { const was = u.sh; u.sh = Math.min(u.maxSh, u.sh + 60 * dt); if (u.isPlayer && was === 0) { this.sfx('shieldUp'); this.hooks.toast('Shield recharging'); } } } }
+  regenShields(dt) { for (const u of this.units) if (u.alive) { u.shT += dt; if (u.shT > (u.shDelay || 3) && u.sh < u.maxSh) { const was = u.sh; u.sh = Math.min(u.maxSh, u.sh + (u.shRate || 60) * dt); if (u.isPlayer && was === 0) { this.sfx('shieldUp'); this.hooks.toast('Shield recharging'); } } } }
   hurtVehicle(v, dmg, src) {
     if (!v.alive || (src && src.team === v.team && !arguments[3])) return; v.hp -= dmg; if (src?.isPlayer) this.hooks.hitmark(false);
     if (v.seats.some(s => s.unit === this.player)) this.hooks.hurt();
@@ -742,23 +747,39 @@ export class Game {
     this.hooks.toast('Chest opened'); }
   // ---- classes ----
   applyClass() { const S = this.save, P = this.player; this.cls = CLASSES[S.cls] ? S.cls : 'vanguard'; const C = CLASSES[this.cls];
-    P.maxSh = 100 + (this.cls === 'vanguard' ? 12 * lv(S, 'ironhide') : 0); P.sh = P.maxSh; P.shDelay = 3 - (this.cls === 'vanguard' ? 0.6 * lv(S, 'secondwind') : 0);
-    P.speedMul = 1 + (this.cls === 'ghostwire' ? 0.05 * lv(S, 'quickstep') : 0);
-    this.skill = { name: C.action.name, dur: C.action.dur + (this.cls === 'vanguard' ? 1.5 * lv(S, 'longwall') : this.cls === 'ghostwire' ? lv(S, 'linger') : 0), cd: C.action.cd - (this.cls === 'sparkwright' ? 4 * lv(S, 'overclock') : 0), t: 0, cdT: 0 };
-    P.dmgTaken = () => this.cls === 'vanguard' && this.skill.t > 0 ? 0.4 : 1; }
+    const k = this.sk = n => C.skills[n] ? lv(S, n) : 0;
+    P.maxSh = 100 + 12 * k('ironhide'); P.sh = P.maxSh; P.shDelay = 3 - 0.6 * k('secondwind') - 0.5 * k('fleet');
+    P.maxHp = 100 + S.stats.hp * 5 + 10 * k('plating'); P.hp = P.maxHp; P.shRate = 60 * (1 + 0.2 * k('fastcharge') + 0.15 * k('recharge'));
+    P.speedMul = 1 + 0.05 * k('quickstep') + 0.04 * k('adrenaline'); this.fragBonus = k('grenadier'); if (P.nades) P.nades.frag = 2 + this.fragBonus;
+    this.skill = { name: C.action.name + (k('dome') ? ': Aegis Dome' : k('decoy') ? ' + Mirage' : k('link') ? ': Arc Link' : ''), dur: C.action.dur + 1.5 * k('longwall') + k('linger') + 3 * k('longcoil'),
+      cd: (C.action.cd - 3 * k('bastion') - 3 * k('shadowstep') - 4 * k('overclock')) * (k('overcharge') ? 0.7 : 1), t: 0, cdT: 0 };
+    this.dome = null;
+    P.dmgTaken = () => (this.cls === 'vanguard' && this.skill.t > 0 && !k('dome') ? 0.4 - 0.05 * k('tough') : 1) * (P.moving ? 1 - 0.05 * k('evasion') : 1) * (this.dome && this.dome.t > 0 && P.pos.distanceTo(this.dome.pos) < 5 ? 0.4 - 0.05 * k('tough') : 1); }
   useSkill() { const k = this.skill, P = this.player; if (!P.alive || P.vehicle) return; if (k.cdT > 0) { this.hooks.toast(`${k.name} ready in ${Math.ceil(k.cdT)}s`); return; }
     k.t = k.dur; k.cdT = k.cd; this.sfx('shieldUp'); this.hooks.toast(k.name.toUpperCase());
-    if (this.cls === 'vanguard') { P.sh = P.maxSh; }
-    else if (this.cls === 'ghostwire') { P.cloakT = k.dur; P.cloakShot = true; for (const u of this.units) if (u.target === P) u.target = null; }
-    else { const g = new THREE.Group(); const b = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.4, 1, 6), this.m(0x4a5560, 'metal')); b.position.y = 0.5;
+    const sk = this.sk;
+    if (this.cls === 'vanguard') { P.sh = P.maxSh;
+      if (sk('rally')) for (const u of this.units) if (u.alive && u.team === P.team && u !== P && u.pos.distanceTo(P.pos) < 10) u.sh = u.maxSh + (sk('rally') > 1 ? 25 : 0);
+      if (sk('dome')) { if (this.dome) this.scene.remove(this.dome.mesh); const m = new THREE.Mesh(new THREE.SphereGeometry(5, 12, 8), new THREE.MeshBasicMaterial({ color: 0x4f8fff, transparent: true, opacity: 0.18, depthWrite: false }));
+        m.position.copy(P.pos); this.scene.add(m); this.dome = { mesh: m, pos: m.position, t: k.dur + 2, team: P.team }; } }
+    else if (this.cls === 'ghostwire') { P.cloakT = k.dur; P.cloakShot = true; for (const u of this.units) if (u.target === P) u.target = null;
+      if (sk('decoy')) this.spawnDecoy(k.dur + 2); }
+    else for (let n = 0; n < (sk('link') ? 2 : 1); n++) { const g = new THREE.Group(); const b = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.4, 1, 6), this.m(0x4a5560, 'metal')); b.position.y = 0.5;
       const h = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.3, 0.6), this.m(0x4fc3ff)); h.position.y = 1.15; g.add(b, h); const f = new THREE.Vector3(-Math.sin(P.yaw), 0, -Math.cos(P.yaw));
-      g.position.set(P.pos.x + f.x * 1.5, P.pos.y, P.pos.z + f.z * 1.5); this.scene.add(g); this.turrets.push({ mesh: g, head: h, t: k.dur, cd: 0, pos: g.position, team: P.team, isPlayer: true, name: 'Arc Turret', kills: 0, dmgMul: 1 + 0.25 * lv(this.save, 'twincoil') }); } }
+      const side = n ? 1 : sk('link') ? -1 : 0; g.position.set(P.pos.x + f.x * 1.5 - f.z * 2.5 * side, P.pos.y, P.pos.z + f.z * 1.5 + f.x * 2.5 * side); this.scene.add(g); this.turrets.push({ mesh: g, head: h, t: k.dur, cd: 0, pos: g.position, team: P.team, isPlayer: true, name: 'Arc Turret', kills: 0, dmgMul: 1 + 0.25 * sk('twincoil'), rate: 1 - 0.2 * sk('rapid') }); } }
+  spawnDecoy(t) { const P = this.player, d = this.makeUnit(P.team, false, 'Mirage'); d.decoy = t; d.maxSh = 0; this.spawn(d, { id: 'd', x: P.pos.x, z: P.pos.z }); d.pos.copy(P.pos); d.spawnProt = 0; d.sh = 0; d.hp = d.maxHp = 150; d.mesh.position.copy(d.pos);
+    d.mesh.traverse(o => { if (o.material) { o.material = o.material.clone(); o.material.transparent = true; o.material.opacity = 0.5; } }); for (const u of this.units) if (u.team !== P.team && u.alive && u.pos.distanceTo(P.pos) < 60) u.target = d; }
   updateSkill(dt) { const k = this.skill, P = this.player; if (!k) return; k.cdT = Math.max(0, k.cdT - dt); k.t = Math.max(0, k.t - dt);
     if (P.cloakT > 0) { P.cloakT -= dt; if (P.firedT > 1.4) P.cloakT = 0; } // firing breaks cloak
+    if (this.dome) { this.dome.t -= dt; if (this.dome.t <= 0) { this.scene.remove(this.dome.mesh); this.dome = null; } }
+    for (const u of this.units) if (u.decoy) { u.decoy -= dt; if (u.decoy <= 0 || !u.alive) { u.alive = false; this.scene.remove(u.mesh); this.units = this.units.filter(x => x !== u); this.hitMeshes = this.hitMeshes.filter(m => m.userData.unit !== u); for (const e of this.units) if (e.target === u) e.target = null; } }
+    const tl = this.turrets.filter(t => t.t > 0); if (tl.length === 2 && this.sk('link')) { this.arcT = (this.arcT || 0) - dt; if (this.arcT <= 0) { this.arcT = 0.3; const a = tl[0].pos, b = tl[1].pos, ab = b.clone().sub(a), L = ab.length();
+      for (const e of this.units) if (e.alive && e.team !== P.team && !e.vehicle) { const t = THREE.MathUtils.clamp(e.pos.clone().sub(a).dot(ab) / (L * L), 0, 1); if (a.clone().addScaledVector(ab, t).distanceTo(e.pos) < 1.2) this.hurt(e, 15, P, false, 'shock'); }
+      this.tracer(a.clone().setY(a.y + 1.2), b.clone().setY(b.y + 1.2)); } }
     for (const t of this.turrets.slice()) { t.t -= dt; t.cd -= dt;
       if (t.t <= 0) { this.scene.remove(t.mesh); this.turrets = this.turrets.filter(x => x !== t); continue; }
       if (t.cd > 0) continue; let best = null, bd = 30; for (const e of this.units) if (e.alive && e.team !== t.team && !e.vehicle) { const d = e.pos.distanceTo(t.pos); if (d < bd && this.canSee({ pos: t.pos }, e) === true) { bd = d; best = e; } }
-      if (best) { t.cd = 0.25; t.head.rotation.y = Math.atan2(-(best.pos.x - t.pos.x), -(best.pos.z - t.pos.z)); const a = t.pos.clone(); a.y += 1.2; const b = best.pos.clone(); b.y += 1.2; this.tracer(a, b);
+      if (best) { t.cd = 0.25 * (t.rate || 1); t.head.rotation.y = Math.atan2(-(best.pos.x - t.pos.x), -(best.pos.z - t.pos.z)); const a = t.pos.clone(); a.y += 1.2; const b = best.pos.clone(); b.y += 1.2; this.tracer(a, b);
         this.sfx('smg', t.pos); this.hurt(best, 9 * t.dmgMul, P, false, 'shock'); if (Math.random() < 0.15) best.dot = { elem: 'shock', dps: 10 * t.dmgMul, t: 3, acc: 0, src: P }; } } }
   end() {
     if (this.over) return; this.over = true; this.running = false; document.exitPointerLock?.();

@@ -8,7 +8,7 @@ export const fresh = () => ({ v: SAVE_VERSION, xp: 0, rank: 0, gp: 500, points: 
   // v2
   inv: [], uid: 1, cls: 'vanguard', skills: {}, zbest: 0, ztotal: 0,
   // v3
-  prestige: 0, weekly: null, dailyWin: '', rent: {}, dura: {}, cos: { camos: ['stock'], rets: ['cross'], camo: 'stock', ret: 'cross' } });
+  prestige: 0, builds: [{}, {}], build: 0, weekly: null, dailyWin: '', rent: {}, dura: {}, cos: { camos: ['stock'], rets: ['cross'], camo: 'stock', ret: 'cross' } });
 // Upgrade any older save to the current version without losing progress.
 export function migrate(s) {
   if (!s || typeof s !== 'object' || !s.v) return null;

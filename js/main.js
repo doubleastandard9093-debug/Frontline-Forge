@@ -7,7 +7,7 @@ import { Game } from './game.js';
 import { Sfx } from './audio.js';
 import { RARITY, ELEMENTS, sellValue, gunLine } from './loot.js';
 import { BACKPACK } from './save.js';
-import { CLASSES, skillPts, lv } from './classes.js';
+import { CLASSES, skillPts, lv, branchSpent, canLearn, switchBuild } from './classes.js';
 import { RENTALS, RENT_PLANS, DURABLE, REPAIR, CAMOS, RETICLES, CRATE_PRICE, MAX_PRESTIGE, gpMult, careerResult, weekly, prestige, openCrate, today } from './career.js';
 
 const $ = id => document.getElementById(id);
@@ -162,7 +162,7 @@ function renderShop() {
       return `<div class="item loot" style="border-left:4px solid ${RARITY[g.rarity].css}"><div class="nm"><b style="color:${RARITY[g.rarity].css}">${g.name}</b> <small>${RARITY[g.rarity].name} · Lv ${g.lvl} · ${gunLine(g)}</small></div>
       <button data-leq="${id}" class="${eq ? 'on' : ''}">${eq ? 'Equipped' : 'Equip ' + slot}</button><button data-sell="${g.uid}" class="danger">Sell ${sellValue(g)} GP</button></div>`; }).join('');
   document.querySelectorAll('[data-leq]').forEach(b => b.onclick = () => { const g = S.inv.find(x => 'L' + x.uid === b.dataset.leq); S.loadout[g.type === 'pistol' ? 'secondary' : 'primary'] = b.dataset.leq; save(S); renderShop(); });
-  document.querySelectorAll('[data-sell]').forEach(b => b.onclick = () => { const uid = +b.dataset.sell, g = S.inv.find(x => x.uid === uid); S.gp += sellValue(g); S.inv = S.inv.filter(x => x !== g);
+  document.querySelectorAll('[data-sell]').forEach(b => b.onclick = () => { const uid = +b.dataset.sell, g = S.inv.find(x => x.uid === uid); S.gp += Math.round(sellValue(g) * (S.cls === 'sparkwright' ? 1 + 0.1 * lv(S, 'salvage') : 1)); S.inv = S.inv.filter(x => x !== g);
     if (S.loadout.primary === 'L' + uid) S.loadout.primary = 'kr4'; if (S.loadout.secondary === 'L' + uid) S.loadout.secondary = 'vx9'; save(S); renderShop(); });
   $('shop').innerHTML = Object.entries(GUNS).map(([id, g]) => {
     const own = S.owned.includes(id), lock = S.rank < g.rank, slot = g.type === 'pistol' ? 'secondary' : 'primary', eq = S.loadout[slot] === id;
@@ -190,14 +190,17 @@ function renderShop() {
     const cur = S.attach[id] || (S.attach[id] = {}); cur[A.slot] = cur[A.slot] === a ? undefined : a; save(S); renderShop(); });
 }
 function renderClasses() {
-  const pts = skillPts(S);
-  $('classlist').innerHTML = `<p>${rankHtml()}</p><p>Skill points: <b>${pts}</b> (1 per rank). Switching class refunds nothing and keeps points per skill.</p>` + Object.entries(CLASSES).map(([k, C]) =>
+  const pts = skillPts(S), b = S.build || 0;
+  $('classlist').innerHTML = `<p>${rankHtml()}</p><p>Skill points: <b>${pts}</b> (1 per rank, +2 per prestige). Each class has 3 branches × 5 tiers; a tier opens after 2 points per earlier tier in that branch. Capstones (tier 5) change how your class plays.</p>
+    <div class="att">Build: ${[0, 1].map(i => `<button data-build="${i}" class="${b === i ? 'on' : ''}">Loadout ${i + 1}</button>`).join('')}</div>` + Object.entries(CLASSES).map(([k, C]) =>
     `<div class="item cls ${S.cls === k ? 'on' : ''}" style="border-left:4px solid ${C.color}"><div class="nm"><b style="color:${C.color}">${C.name}</b> <small>${C.role} · Action skill (H / SKILL): <b>${C.action.name}</b> — ${C.action.desc}, ${C.action.dur}s, ${C.action.cd}s cooldown</small>
-      ${S.cls === k ? Object.entries(C.skills).map(([sk, X]) => `<div class="row"><span>${X.name} ${lv(S, sk)}/${X.max} <small>${X.desc} per point</small></span><button data-sk="${sk}" ${pts > 0 && lv(S, sk) < X.max ? '' : 'disabled'}>+1</button></div>`).join('') : ''}</div>
+      ${S.cls === k ? `<div class="tree">${C.branches.map((bn, bi) => `<div class="branch"><h4>${bn} <small>${branchSpent(S, k, bi)} pts</small></h4>${Object.entries(C.skills).filter(([, X]) => X.br === bi).map(([sk, X]) => { const open = branchSpent(S, k, bi) >= 2 * (X.tier - 1);
+        return `<div class="row ${open ? '' : 'locked'} ${X.tier === 5 ? 'cap' : ''}"><span>T${X.tier} ${X.name} ${lv(S, sk)}/${X.max} <small>${X.desc}</small></span><button data-sk="${sk}" ${canLearn(S, k, sk) ? '' : 'disabled'}>+1</button></div>`; }).join('')}</div>`).join('')}</div>` : ''}</div>
       <button data-cls="${k}" class="${S.cls === k ? 'on' : ''}">${S.cls === k ? 'Selected' : 'Select'}</button></div>`).join('') +
-    `<button id="respec" class="danger">Reset skill points (100 GP)</button>`;
-  document.querySelectorAll('[data-cls]').forEach(b => b.onclick = () => { S.cls = b.dataset.cls; save(S); renderClasses(); });
-  document.querySelectorAll('[data-sk]').forEach(b => b.onclick = () => { S.skills[b.dataset.sk] = lv(S, b.dataset.sk) + 1; save(S); renderClasses(); });
+    `<button id="respec" class="danger">Reset this loadout's skill points (100 GP)</button>`;
+  document.querySelectorAll('[data-build]').forEach(x => x.onclick = () => { switchBuild(S, +x.dataset.build); save(S); renderClasses(); });
+  document.querySelectorAll('[data-cls]').forEach(x => x.onclick = () => { S.cls = x.dataset.cls; save(S); renderClasses(); });
+  document.querySelectorAll('[data-sk]').forEach(x => x.onclick = () => { if (!canLearn(S, S.cls, x.dataset.sk)) return; S.skills[x.dataset.sk] = lv(S, x.dataset.sk) + 1; save(S); renderClasses(); });
   $('respec').onclick = () => { if (S.gp < 100) return alert('Not enough GP'); S.gp -= 100; S.skills = {}; save(S); renderClasses(); };
 }
 function renderStats() {
