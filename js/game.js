@@ -10,6 +10,7 @@ import { installZombies } from './zombies.js';
 import { RENTALS, CAMOS, durMult } from './career.js';
 import { KINDS, createVehicle, syncSolid } from './vehicles.js';
 import { input, pollKeys, consume, endFrame, consumeHeld } from './input.js';
+import { rumble } from './pad.js';
 
 const TICK = 1 / 60, EYE = 1.6, RAD = 0.4, GRAV = 15; // lower gravity, floaty high jumps
 const BOT_NAMES = ['Viper','Rook','Hatch','Nomad','Quill','Saber','Ghostline','Tank','Moth','Flint','Ruckus','Jinx','Bolt','Cinder','Drift','Echo','Grim','Halo','Ion','Kestrel','Lynx','Mako','Onyx','Pike'];
@@ -213,7 +214,7 @@ export class Game {
     if (!input.fire || this.fireT > 0) return;
     if (w.lock) { if (this.semiHeld) return; this.semiHeld = true; this.fireT = 60 / w.rpm; w.ammo--; this.sfx('sniper'); this.fireLauncher(w); this.recoilP += w.recoil; this.kick = 1; this.hooks.hud(this); return; }
     if (!w.auto) { if (this.semiHeld) return; this.semiHeld = true; }
-    this.fireT = 60 / w.rpm; w.ammo--; this.player.firedT = 1.5; this.sfx(Game.gunSound(w));
+    this.fireT = 60 / w.rpm; w.ammo--; this.player.firedT = 1.5; rumble(w.splash ? 0.8 : 0.25, 0.35, w.splash ? 140 : 45); this.sfx(Game.gunSound(w));
     const moving = Math.hypot(input.move.x, input.move.y) > 0.1, ads = this.adsT > 0.5;
     const spread = (w.spread + (w.bloom || 0)) * (ads ? 0.3 : 1) * (moving ? (ads ? 1.15 : 1.8) : 1) * (this.player.onGround ? 1 : 2);
     w.bloom = Math.min(w.spread * 1.5, (w.bloom || 0) + w.spread * 0.15); w.sinceShot = 0;
@@ -281,7 +282,7 @@ export class Game {
     u.shT = 0;
     if (u.sh > 0) { const a = Math.min(u.sh, dmg); u.sh -= a; dmg -= a; if (u.sh <= 0) this.shieldPop(u); } else if (head) dmg *= 2;
     u.hp -= dmg; if (src?.isPlayer && u !== src) { const w = this.slots?.[this.slot]; if (w?.affixes?.includes('vampiric')) src.hp = Math.min(src.maxHp, src.hp + dmg * 0.04); } if (src.isPlayer) { this.stats.dmg += dmg; this.hooks.hitmark(head); }
-    if (u.isPlayer) this.hooks.hurt();
+    if (u.isPlayer) { this.hooks.hurt(); rumble(0.7, 0.4, 150); }
     if (!u.isPlayer && src && !u.target) u.target = src;
     if (u.hp <= 0 && this.mode === 'zombies' && u.team === 0) { this.zDown(u); return; }
     if (u.hp <= 0) {
@@ -483,7 +484,8 @@ export class Game {
     else if (P.alive) {
       P.spawnProt = Math.max(0, (P.spawnProt || 0) - dt);
       P.moving = Math.hypot(input.move.x, input.move.y) > 0.1; P.rushT = Math.max(0, (P.rushT || 0) - dt);
-    const sp = 5.5 * (P.speedMul || 1) * (P.rushT > 0 ? 1.2 : 1) * (P.cloakT > 0 && this.sk ? 1 + 0.1 * this.sk('ghostrun') : 1) * (P.zSpeed || 1) * (P.downed ? 0.25 : 1) * (1 + this.save.stats.speed * 0.03) * (input.sprint && input.move.y > 0 && !input.ads ? 1.45 : 1) * (input.ads ? 0.6 : 1);
+    const sp = 5.5 * (P.speedMul || 1) * (P.rushT > 0 ? 1.2 : 1) * (P.cloakT > 0 && this.sk ? 1 + 0.1 * this.sk('ghostrun') : 1) * (P.zSpeed || 1) * (P.downed ? 0.25 : 1) * (1 + this.save.stats.speed * 0.03) * (input.sprint && input.move.y > 0 && !input.ads ? 1.45 : 1) * (input.ads ? 0.6 : 1) * (input.crouch ? 0.55 : 1) * ((P.slideT || 0) > 0 ? 1.6 : 1);
+      if (consume('pad_slide') && P.onGround) { P.slideT = 0.6; rumble(0.3, 0.5, 120); } P.slideT = Math.max(0, (P.slideT || 0) - dt);
       const fx = -Math.sin(P.yaw), fz = -Math.cos(P.yaw), rx = Math.cos(P.yaw), rz = -Math.sin(P.yaw);
       let mx = fx * input.move.y + rx * input.move.x, mz = fz * input.move.y + rz * input.move.x; const l = Math.hypot(mx, mz); if (l > 1) { mx /= l; mz /= l; }
       this.moveUnit(P, mx * sp * dt, mz * sp * dt, dt, input.jump);
@@ -505,7 +507,7 @@ export class Game {
     if (P.vehicle) { const K = P.vehicle.K, f = new THREE.Vector3(0, 0, 1).applyEuler(this.camera.rotation);
       const r = new THREE.Vector3(1, 0, 0).applyEuler(this.camera.rotation);
       this.camera.position.set(P.pos.x, P.pos.y + K.camH, P.pos.z).addScaledVector(f, K.camDist).addScaledVector(r, 1.8); this.view.visible = false; this.hooks.scope(false); }
-    else this.camera.position.set(P.pos.x, P.pos.y + EYE, P.pos.z);
+    else this.camera.position.set(P.pos.x, P.pos.y + EYE - (input.crouch || P.slideT > 0 ? 0.55 : 0), P.pos.z);
     this.near = null; this.hijack = null; if (!P.vehicle && P.alive) for (const v of this.vehicles) { if (!v.alive) continue; const d = v.pos.distanceTo(P.pos);
       if (v.team === P.team && d < 5 && v.seats.some(s => !s.unit)) { this.near = v; break; }
       if (v.team !== P.team && (v.K.mode === 'car' || v.K.mode === 'tracked' || v.K.mode === 'walker' || v.K.mode === 'boat') && d < v.K.r + 2.2 && Math.abs(v.pos.y - P.pos.y) < 4) this.hijack = v; }

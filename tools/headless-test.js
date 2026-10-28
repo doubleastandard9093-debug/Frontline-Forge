@@ -21,4 +21,4 @@ setTimeout(async () => {
     console.log(JSON.stringify({ errs, result: res?.result?.value ?? res?.exceptionDetails?.exception?.description, reqs: reqs.filter(u => !u.startsWith('data:')).map(u => u.replace(/^.*\//, '')) }, null, 1));
     ch.kill(); process.exit(0);
   };
-}, 1500);
+}, 4000);

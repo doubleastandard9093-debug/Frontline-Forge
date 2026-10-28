@@ -93,6 +93,12 @@
   <div class="row"><button id="gyroBtn">Enable gyro</button><label><input type="checkbox" id="gyroOn"> On</label><label><input type="checkbox" id="gyroInvX"> Invert X</label><label><input type="checkbox" id="gyroInv"> Invert Y</label><label><input type="checkbox" id="gyroAds"> ADS only</label></div>
   <div class="row"><span>Gyro sensitivity</span><input id="gyroSens" type="range" min="0.2" max="3" step="0.1"></div>
   <p class="note" id="gyroNote"></p>
+  <h3>Controller (Xbox)</h3>
+  <div class="row"><span>Stick sensitivity</span><input id="padSens" type="range" min="0.3" max="3" step="0.1"></div>
+  <div class="row"><span>Stick deadzone</span><input id="padDz" type="range" min="0.05" max="0.35" step="0.01"></div>
+  <div class="row"><label><input type="checkbox" id="padInv"> Invert Y</label><label><input type="checkbox" id="padRumble"> Rumble</label></div>
+  <p class="note" id="padNote"></p>
+  <p class="note">Left stick move · Right stick look · RT fire/place (vehicle: fire + throttle) · LT aim (vehicle: brake/reverse) · A jump (heli: up) · B crouch, slide while sprinting (heli: down) · X tap reload, hold interact / enter-exit vehicle · Y swap weapon · LB grenade (mech: stomp) · RB build on/off · D-pad ↑ wall → floor ↓ ramp ← class skill · L3 sprint · R3 melee · Start pause · View tap map, hold scoreboard. Menus: D-pad/left stick move, A select, B back. Gyro aim still adds on top.</p>
   <h3>Save</h3>
   <div class="row"><button id="exp">Export save</button><button id="imp">Import save</button><button id="wipe" class="danger">Reset</button></div>
   <textarea id="code" placeholder="Save code appears here, or paste one to import"></textarea>

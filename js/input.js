@@ -2,6 +2,7 @@
 export const input = { move: { x: 0, y: 0 }, look: { x: 0, y: 0 }, fire: false, ads: false, jump: false, sprint: false,
   pressed: new Set(), touch: false };
 const keys = new Set();
+import { applyPad } from './pad.js';
 export function initInput(canvas, isActive) {
   addEventListener('keydown', e => { if (!isActive()) return; if (!keys.has(e.code)) input.pressed.add(e.code); keys.add(e.code); if (e.code === 'Tab' || e.code === 'Space') e.preventDefault(); });
   addEventListener('keyup', e => keys.delete(e.code));
@@ -57,6 +58,7 @@ export function pollKeys() {
     input.sprint = keys.has('ShiftLeft');
   }
   input.jump = keys.has('Space') || input.pressed.has('btn_jump') || !!input.jumpHeld;
+  applyPad();
 }
 export function consumeHeld(code) { return keys.has(code); }
 export function consume(...codes) { for (const c of codes) if (input.pressed.has(c)) { input.pressed.delete(c); return true; } return false; }

@@ -2,6 +2,7 @@ import { GUNS, ATTACH, RANKS, STATS, xpForRank, BOT_TIERS } from './data.js';
 import { MAPS } from './maps.js';
 import { load, save, exportCode, importCode, fresh } from './save.js';
 import { pickTier } from './gfx.js';
+import { pad, initPad, menuNav } from './pad.js';
 import { initInput, gyro, enableGyro, gyroSupported, setGyroActive } from './input.js';
 import { Game } from './game.js';
 import { Sfx } from './audio.js';
@@ -89,6 +90,20 @@ const hooks = { hf: HF,
 $('resume').onclick = () => { show(null); game.paused = false; };
 $('quit').onclick = () => { game.dispose(); show('menu'); };
 initInput(canvas, () => game && game.running && !game.paused);
+// Xbox controller (Bluetooth/USB)
+Object.assign(pad, { sens: S.padSens ?? 1, invertY: !!S.padInv, dz: S.padDz ?? 0.15, rumbleOn: S.padRumble ?? true,
+  isActive: () => !!(game && game.running && !game.paused), inVehicle: () => !!game?.player?.vehicle,
+  onConnect: () => { hooks.toast('🎮 Controller connected'); renderPad(); }, onDisconnect: () => { hooks.toast('Controller disconnected'); renderPad(); },
+  onMenu: d => { const scr = screens.map($).find(e => !e.classList.contains('hidden')); if (!scr) return;
+    if (d === 'start' && scr.id === 'pause') { $('pause').querySelector('button')?.click(); return; }
+    menuNav(scr, d, () => { const b = scr.querySelector('[data-go="menu"],[data-go="play"]'); if (scr.id === 'pause') scr.querySelector('button')?.click(); else if (b) b.click(); }); } });
+initPad();
+function renderPad() { if (!$('padSens')) return; $('padSens').value = pad.sens; $('padInv').checked = pad.invertY; $('padRumble').checked = pad.rumbleOn; $('padDz').value = pad.dz;
+  $('padNote').textContent = pad.connected ? 'Connected: ' + pad.id : 'No controller. Pair an Xbox controller over Bluetooth (iPhone: Settings > Bluetooth), then press any button.'; }
+$('padSens').oninput = e => { pad.sens = S.padSens = +e.target.value; save(S); };
+$('padDz').oninput = e => { pad.dz = S.padDz = +e.target.value; save(S); };
+$('padInv').onchange = e => { pad.invertY = S.padInv = e.target.checked; save(S); };
+$('padRumble').onchange = e => { pad.rumbleOn = S.padRumble = e.target.checked; save(S); };
 setGyroActive(() => game && game.running && !game.paused && !game.choosing);
 Object.assign(gyro, { on: !!S.gyro, sens: S.gyroSens ?? 1, invertX: !!S.gyroInvX, invertY: !!S.gyroInv, adsOnly: !!S.gyroAds });
 const isTouch = matchMedia('(pointer: coarse)').matches;
@@ -155,7 +170,7 @@ function render(id) {
   if (id === 'stats') renderStats();
   if (id === 'classes') renderClasses();
   if (id === 'settings') {
-    $('gLow').classList.toggle('on', tier === 'low'); $('gHigh').classList.toggle('on', tier === 'high'); $('sens').value = S.sens || 1; $('vol').value = S.vol ?? 0.7; renderGyro();
+    $('gLow').classList.toggle('on', tier === 'low'); $('gHigh').classList.toggle('on', tier === 'high'); $('sens').value = S.sens || 1; $('vol').value = S.vol ?? 0.7; renderGyro(); renderPad();
   }
 }
 function renderShop() {
